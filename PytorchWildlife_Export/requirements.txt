@@ -1,0 +1,14 @@
+onnxruntime
+numpy
+ultralytics
+torch
+torchvision
+pyyaml
+wget
+tensorboard
+onnx
+onnx-simplifier
+onnxscript
+onnxslim
+Pillow
+opencv-python

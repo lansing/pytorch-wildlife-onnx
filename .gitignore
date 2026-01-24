@@ -1,0 +1,60 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+.Trashes
+.fseventsd
+.Spotlight-V100
+.VolumeIcon.icns
+
+# Programs
+.fuse_hidden*
+
+# Python
+.Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+.venv/
+env/
+venv/
+*.bak
+*.orig
+*.swp
+*.swo
+
+# Vim swap files
+*.swp
+*.swo
+
+# Built/exported files
+exported_models_test/
+demo_output/
+crop_output/
+
+# Logs and other temporary files
+*.log
+*.tmp
+*.temp
+*~
+.ipynb_checkpoints/
+.pytest_cache/
+.coverage
+.coverage.*
+.mypy_cache/
+.vscode/
+
+# IDE-specific files
+.idea/
+
+# Ignore sample_models directory
+sample_models/
+
+
+
+
