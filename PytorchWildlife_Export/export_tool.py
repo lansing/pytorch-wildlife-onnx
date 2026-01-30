@@ -11,7 +11,7 @@ from PytorchWildlife_Export.model_loaders.yolov9_loader import YoloV9Loader
 from PytorchWildlife_Export.model_loaders.rtdetr_loader import RTDETRLoader
 from PytorchWildlife_Export.model_exporters.yolov9_onnx_exporter import YoloV9ONNXExporter
 from PytorchWildlife_Export.model_exporters.rtdetr_onnx_exporter import RTDETRONNXExporter
-from PytorchWildlife_Export.model_exporters.yolov10_v9_compatible_exporter import YOLOv10V9CompatibleONNXExporter # Re-add import
+from PytorchWildlife_Export.model_exporters.yolov10_v9_compatible_exporter import YOLOv10V9CompatibleONNXExporter
 
 def main():
     parser = argparse.ArgumentParser(description="Export PyTorch Wildlife models to ONNX format.")
@@ -39,8 +39,8 @@ def main():
         "--format",
         type=str,
         default="float32",
-        choices=["float32", "float16", "int8"],
-        help="Numeric format for the exported ONNX model ('float32', 'float16', 'int8')."
+        choices=["float32", "float16", "int8", "uint8"], # Re-added uint8 and int8
+        help="Numeric format for the exported ONNX model ('float32', 'float16', 'int8', 'uint8')."
     )
     parser.add_argument(
         "--opset",
