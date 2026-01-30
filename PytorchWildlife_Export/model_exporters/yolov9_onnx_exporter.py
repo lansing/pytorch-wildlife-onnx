@@ -1,6 +1,7 @@
 import torch.nn as nn
 from ultralytics import YOLO # Import YOLO object
 import shutil # Import shutil for moving files
+import os # Import os for path manipulation
 from .onnx_exporter import ONNXExporter
 from typing import Literal
 
@@ -16,6 +17,7 @@ class YoloV9ONNXExporter(ONNXExporter):
         opset_version: int = 18, # Use opset 18
         do_simplify: bool = False, # Simplified will be handled by ultralytics export
         export_format: Literal["float32", "float16"] = "float32",
+        # Removed nms argument
         **kwargs
     ) -> str: # Changed return type to str
         """
@@ -29,6 +31,7 @@ class YoloV9ONNXExporter(ONNXExporter):
             opset_version (int): The ONNX opset version to use.
             do_simplify (bool): Whether to simplify the ONNX graph. This will be passed to ultralytics export.
             export_format (Literal["float32", "float16"]): The numeric format for export.
+            # Removed nms argument
             **kwargs: Additional arguments to pass to model.export().
         
         Returns:
@@ -47,6 +50,9 @@ class YoloV9ONNXExporter(ONNXExporter):
             'workspace': 4, # Default from ultralytics docs
             'half': True if export_format == "float16" else False,
             'int8': True if export_format == "int8" else False, # Add int8 here, but raise error in base for now
+            'name': os.path.basename(output_path), # Specify output filename
+            'exist_ok': True, # Overwrite if exists
+            'nms': False, # Force NMS to False for the raw output export
             **kwargs
         }
 
@@ -54,14 +60,20 @@ class YoloV9ONNXExporter(ONNXExporter):
         if export_format == "int8":
             raise NotImplementedError("Int8 export is not supported directly through ultralytics.YOLO.export without further quantization steps.")
 
-        print(f"Exporting YOLO model to ONNX using ultralytics.YOLO.export (format: {export_format}, opset: {opset_version})...")
+        print(f"Exporting YOLO model to ONNX using ultralytics.YOLO.export (format: {export_kwargs['format']}, opset: {export_kwargs['opset']}, nms={export_kwargs['nms']})...")
         try:
-            exported_model_path = model.export(**export_kwargs)
-            print(f"Ultralytics exported model to: {exported_model_path}")
+            exported_model_path_from_ultralytics = model.export(**export_kwargs)
+            print(f"Ultralytics exported model to: {exported_model_path_from_ultralytics}")
             
-            # Ultralytics exports to a default location (usually same dir as input .pt file or runs/detect/exp/weights)
-            # We want to move/rename it to the desired output_path
-            shutil.move(exported_model_path, output_path)
+            # The model.export() method already returns the final path. We just need to ensure
+            # it's in the desired output_path. Ultralytics saves to runs/detect/export by default.
+            # We want it in our exported_models_test directory.
+            
+            # Create the directory for output_path if it doesn't exist
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            # Move the file from where ultralytics saved it to our desired output_path
+            shutil.move(exported_model_path_from_ultralytics, output_path)
             print(f"Moved exported ONNX model to {output_path}")
             return output_path
         except Exception as e:

@@ -25,11 +25,11 @@ class TestModelExporters(unittest.TestCase):
         print(f"\nExported models will be saved to: {os.path.abspath(cls.output_dir)}")
 
     @classmethod
-    # def tearDownClass(cls):
-    #     # Clean up the exported models directory
-    #     if os.path.exists(cls.output_dir):
-    #         shutil.rmtree(cls.output_dir)
-    #         print(f"Cleaned up {cls.output_dir}")
+    def tearDownClass(cls):
+        # Clean up the exported models directory
+        if os.path.exists(cls.output_dir):
+            shutil.rmtree(cls.output_dir)
+            print(f"Cleaned up {cls.output_dir}")
 
     def test_yolov9_export_and_validate_float32(self):
         """
@@ -67,7 +67,11 @@ class TestModelExporters(unittest.TestCase):
         success, _ = validator.validate_forward_pass()
         self.assertTrue(success, "ONNX model forward pass should succeed.")
         print("ONNX model validated successfully.")
-        print(f"ONNX Model Info: {validator.get_model_info()}")
+        model_info = validator.get_model_info()
+        print(f"ONNX Model Info: {model_info}")
+        print(f"YOLOv9 ONNX output names: {model_info.get('output_names')}")
+        print(f"YOLOv9 ONNX output shapes: {model_info.get('output_shapes')}")
+
 
     def test_yolov9_export_and_validate_float16(self):
         """
@@ -108,25 +112,26 @@ class TestModelExporters(unittest.TestCase):
         print(f"ONNX Model Info: {validator.get_model_info()}")
 
     # Add a temporary test case to export the 1280x1280 model for the demo
-    def test_export_1280x1280_for_demo(self):
-        print("\n--- Exporting 1280x1280 YOLOv9 model for demo ---")
-        model_name = "MDV6-yolov9-c"
-        onnx_path = os.path.join(self.output_dir, f"{model_name}_1280x1280.onnx")
+    # The demo will now use the export_tool.py to export its needed model
+    # def test_export_1280x1280_for_demo(self):
+    #     print("\n--- Exporting 1280x1280 YOLOv9 model for demo ---")
+    #     model_name = "MDV6-yolov9-c"
+    #     onnx_path = os.path.join(self.output_dir, f"{model_name}_1280x1280.onnx")
 
-        loader = YoloV9Loader(version=model_name)
-        model_yolo = loader.load_model()
+    #     loader = YoloV9Loader(version=model_name)
+    #     model_yolo = loader.load_model()
         
-        exporter = YoloV9ONNXExporter()
-        actual_onnx_path = exporter.export(
-            model=model_yolo,
-            output_path=onnx_path,
-            input_shape=(1, 3, 1280, 1280), # Explicitly set input shape
-            opset_version=18,
-            do_simplify=True,
-            export_format="float32",
-        )
-        self.assertTrue(os.path.exists(actual_onnx_path), "ONNX model file for demo should exist.")
-        print(f"1280x1280 YOLOv9 model exported to: {actual_onnx_path}")
+    #     exporter = YoloV9ONNXExporter()
+    #     actual_onnx_path = exporter.export(
+    #         model=model_yolo,
+    #         output_path=onnx_path,
+    #         input_shape=(1, 3, 1280, 1280), # Explicitly set input shape
+    #         opset_version=18,
+    #         do_simplify=True,
+    #         export_format="float32",
+    #     )
+    #     self.assertTrue(os.path.exists(actual_onnx_path), "ONNX model file for demo should exist.")
+    #     print(f"1280x1280 YOLOv9 model exported to: {actual_onnx_path}")
 
 
     @unittest.skip("Skipping RT-DETR export due to persistent ONNXRuntime loading issues. Model is syntactically valid but fails ONNXRuntime initializer checks.")

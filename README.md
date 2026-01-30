@@ -2,6 +2,38 @@
 
 This repository contains custom scripts and utilities to export models from the PytorchWildlife project into various formats (specifically ONNX initially) and to run inference with the exported models.
 
+## Quickstart
+
+### 1. Setup Environment
+Ensure you have `pyenv` installed. Then, set up your development environment by running:
+```bash
+make install
+```
+This will install Python 3.11.8, set up a `uv` virtual environment, and install all necessary dependencies.
+
+### 2. Export a YOLOv9 Model (Raw Output)
+You can export a `MegaDetectorV6 YOLOv9 compact` model to ONNX (float32, with simplification, *raw pre-NMS output*) using the `export_tool.py` CLI:
+```bash
+source .venv/bin/activate
+python PytorchWildlife_Export/export_tool.py \
+    --model_type yolov9 \
+    --model_version MDV6-yolov9-c \
+    --output_path exported_models_test/MDV6-yolov9-c_1280x1280_raw.onnx \
+    --format float32 \
+    --opset 18 \
+    --simplify \
+    --input_img_size 1280
+```
+*(The model weights will be downloaded on first export if not present locally.)*
+
+### 3. Run the Inference Demo
+After exporting a model, you can run the image detection demo:
+```bash
+source .venv/bin/activate
+python PytorchWildlife_Export/demo/onnx_image_detector_demo.py
+```
+This will load the `exported_models_test/MDV6-yolov9-c_1280x1280_raw.onnx` model, run inference on a sample image, and save two annotated images to `PytorchWildlife_Export/demo/demo_output/`: one with custom post-processing and one with the Ultralytics baseline.
+
 ## Table of Contents
 1. [Setup](#setup)
 2. [Model Inspector/Validator](#model-inspectorvalidator)
@@ -21,6 +53,7 @@ cd pytorch-wildlife-export
 
 ### 2. Python Environment Setup
 We use `pyenv` for Python version management and `uv` for virtual environment and package management.
+*(Note: This is automatically handled by `make install`)*
 
 **a. Install Python 3.11:**
 ```bash
@@ -86,17 +119,17 @@ The RT-DETR model export via `torch.onnx.export` currently produces a syntactica
 
 ## Inference Utilities
 
-The `inference_utils` module provides classes to perform inference using the exported ONNX models.
+The `inference_utils` module provides classes to perform inference using the exported ONNX models. These models are assumed to output raw (pre-NMS) predictions, and the post-processing is handled by custom code.
 
 **To run the ONNX Image Detector Demo (YOLOv9):**
-This demo script uses an exported `MegaDetectorV6 YOLOv9` ONNX model to detect objects in a sample image and visualize the results.
+This demo script uses an exported `MegaDetectorV6 YOLOv9` ONNX model (raw output) to detect objects in a sample image and visualize the results using our custom post-processing, comparing them against the Ultralytics baseline.
 
-First, ensure the required YOLOv9 1280x1280 ONNX model for the demo is exported (this is done by running `test_model_exporters.py` which includes a test for exporting this model).
+First, ensure the required YOLOv9 1280x1280 ONNX model (raw output) for the demo is exported (this is done by running the `make export` command from the Quickstart).
 ```bash
 source .venv/bin/activate
 python PytorchWildlife_Export/demo/onnx_image_detector_demo.py
 ```
-The script will load the `exported_models_test/MDV6-yolov9-c_1280x1280.onnx` model, run inference on `PytorchWildlife_Export/demo/sample_image.jpg`, and save the annotated image to `PytorchWildlife_Export/demo/demo_output/detected_sample_image.jpg`.
+The script will load the `exported_models_test/MDV6-yolov9-c_1280x1280_raw.onnx` model, run inference on `PytorchWildlife_Export/demo/sample_image.jpg`, and save two annotated images to `PytorchWildlife_Export/demo/demo_output/`: `detected_sample_image_custom_pp.jpg` (our custom post-processing) and `detected_sample_image_ultralytics_baseline.jpg` (Ultralytics' interpretation).
 
 ---
 **Development Notes:**
