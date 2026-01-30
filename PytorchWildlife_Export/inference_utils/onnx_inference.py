@@ -4,16 +4,20 @@ import cv2
 from PIL import Image
 import os
 import math
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Tuple, Any
 
 # Try to import ultralytics, but don't fail if not present (e.g., for non-YOLO ONNX models)
 try:
     from ultralytics import YOLO
     from ultralytics.engine.results import Results
+    from ultralytics.utils.ops import scale_boxes # Import ultralytics's scale_boxes
+    from ultralytics.utils.ops import clip_boxes # Import ultralytics's clip_boxes
 except ImportError:
     YOLO = None
     Results = None
-    print("Ultralytics not found. YOLO-specific post-processing will not be available.")
+    scale_boxes = None
+    clip_boxes = None
+    print("Ultralytics not found. YOLO-specific features might be limited.")
 
 from PytorchWildlife_Export.postprocessors.base_postprocessor import BasePostProcessor
 
@@ -49,17 +53,19 @@ class ONNXInferenceSession:
         print(f"Input Name: {self.input_name}, Input Shape: {self.input_shape}")
         print(f"Output Name: {self.output_name}")
 
-    def preprocess_image(self, image_path: str) -> Tuple[np.ndarray, Tuple[int, int]]:
+    def preprocess_image(self, image_path: str) -> Tuple[np.ndarray, Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]]:
         """
         Preprocesses a single image to the format expected by the ONNX model for onnxruntime.
+        Implements ultralytics LetterBox functionality to maintain aspect ratio and pad.
 
         Args:
             image_path (str): Path to the input image.
 
         Returns:
-            Tuple[np.ndarray, Tuple[int, int]]:
-                - resized_image_chw: The preprocessed image as a NumPy array (CHW).
+            Tuple[np.ndarray, Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]]:
+                - preprocessed_image_bchw: The preprocessed image as a NumPy array (BCHW).
                 - original_dims: Original (width, height) of the image.
+                - ratio_pad: ((gain, gain), (pad_x, pad_y)) for scaling boxes back.
         """
         original_image = cv2.imread(image_path)
         if original_image is None:
@@ -67,16 +73,56 @@ class ONNXInferenceSession:
         
         original_dims = (original_image.shape[1], original_image.shape[0]) # (width, height)
 
-        img_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+        # 1. LetterBox Resizing and Padding
+        img_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB) # Convert to RGB
+        
+        shape = img_rgb.shape[:2]  # current shape [height, width]
+        new_shape = (self.input_shape[2], self.input_shape[3]) # target shape [height, width]
 
-        input_h, input_w = self.input_shape[2], self.input_shape[3]
-        resized_image = cv2.resize(img_rgb, (input_w, input_h), interpolation=cv2.INTER_AREA)
+        # Scale ratio (new / old)
+        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+        # Allow scaling up (default in ultralytics for LetterBox is scaleup=True)
+        # r = min(r, 1.0) # only scale down (original is commented out, so we follow ultralytics default)
 
-        resized_image_chw = resized_image.astype(np.float32) / 255.0
-        resized_image_chw = np.transpose(resized_image_chw, (2, 0, 1))  # HWC to CHW
-        resized_image_chw = np.expand_dims(resized_image_chw, axis=0) # Add batch dimension
+        # Compute padding
+        new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r)) # new_unpad width, height
+        dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
 
-        return resized_image_chw, original_dims
+        # Auto padding (ultralytics uses this if auto=True, which is not default for LetterBox directly)
+        # For simplicity, assuming auto=False and center padding for now.
+        # if auto: # minimum rectangle
+        #     dw, dh = np.mod(dw, self.stride), np.mod(dh, self.stride) # wh padding
+
+        # Center padding (default in ultralytics LetterBox)
+        dw /= 2 # divide padding into 2 sides
+        dh /= 2
+
+        if shape[::-1] != new_unpad:  # resize if needed
+            img_resized = cv2.resize(img_rgb, new_unpad, interpolation=cv2.INTER_LINEAR)
+        else:
+            img_resized = img_rgb
+
+        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        
+        # padding_value = 114 (default in ultralytics LetterBox)
+        padded_image = cv2.copyMakeBorder(
+            img_resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114)
+        )
+        
+        # Store ratio_pad for post-processing bounding boxes
+        gain = r
+        pad_x, pad_y = left, top # These are the actual left and top padding amounts
+        ratio_pad = ((gain, gain), (pad_x, pad_y))
+
+        # 2. Normalize pixel values to [0, 1]
+        preprocessed_image = padded_image.astype(np.float32) / 255.0
+
+        # 3. Transpose to BCHW
+        preprocessed_image_bchw = np.transpose(preprocessed_image, (2, 0, 1))  # HWC to CHW
+        preprocessed_image_bchw = np.expand_dims(preprocessed_image_bchw, axis=0) # Add batch dimension
+
+        return preprocessed_image_bchw, original_dims, ratio_pad
 
     def run_inference(
         self,
@@ -99,7 +145,7 @@ class ONNXInferenceSession:
         Returns:
             List[Dict]: A list of detected objects with bounding boxes, confidence, and class info.
         """
-        preprocessed_image, original_dims = self.preprocess_image(image_path)
+        preprocessed_image, original_dims, ratio_pad = self.preprocess_image(image_path)
         
         # Run inference with onnxruntime
         raw_output = self.session.run([self.output_name], {self.input_name: preprocessed_image})[0]
@@ -111,7 +157,8 @@ class ONNXInferenceSession:
             input_shape=self.input_shape,
             confidence_threshold=confidence_threshold,
             iou_threshold=iou_threshold,
-            class_names=class_names
+            class_names=class_names,
+            ratio_pad=ratio_pad # Pass ratio_pad for correct bbox scaling
         )
         
         return detections

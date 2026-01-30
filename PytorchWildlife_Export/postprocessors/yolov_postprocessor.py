@@ -1,23 +1,13 @@
 import numpy as np
 import cv2
-from typing import List, Dict, Tuple
+import torch # Import torch
+from typing import List, Dict, Tuple, Any
+
+# Import ultralytics NMS and ops
+from ultralytics.utils.ops import xywh2xyxy, scale_boxes, clip_boxes # Import ultralytics's ops functions
+from ultralytics.utils.nms import non_max_suppression
 
 from PytorchWildlife_Export.postprocessors.base_postprocessor import BasePostProcessor
-
-# Helper function inspired by ultralytics.utils.ops.xywh2xyxy
-def xywh2xyxy_np(x: np.ndarray) -> np.ndarray:
-    """
-    Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format.
-    Numpy version of ultralytics.utils.ops.xywh2xyxy.
-    """
-    y = np.empty_like(x)
-    xy = x[..., :2]
-    wh_half = x[..., 2:] / 2
-    y[..., 0] = xy[..., 0] - wh_half[..., 0] # x1
-    y[..., 1] = xy[..., 1] - wh_half[..., 1] # y1
-    y[..., 2] = xy[..., 0] + wh_half[..., 0] # x2
-    y[..., 3] = xy[..., 1] + wh_half[..., 1] # y2
-    return y
 
 class YOLOvPostProcessor(BasePostProcessor):
     """
@@ -36,7 +26,8 @@ class YOLOvPostProcessor(BasePostProcessor):
         input_shape: List[int], # [batch_size, channels, height, width]
         confidence_threshold: float,
         iou_threshold: float,
-        class_names: Dict[int, str]
+        class_names: Dict[int, str],
+        ratio_pad: Tuple[Tuple[float, float], Tuple[float, float]] # ((gain, gain), (pad_x, pad_y))
     ) -> List[Dict]:
         """
         Converts raw ONNX output tensors into a list of structured detection results.
@@ -49,79 +40,79 @@ class YOLOvPostProcessor(BasePostProcessor):
             confidence_threshold (float): Confidence threshold for filtering detections.
             iou_threshold (float): IoU threshold for Non-Maximum Suppression (NMS).
             class_names (Dict[int, str]): Mapping of class IDs to class names.
+            ratio_pad (Tuple[Tuple[float, float], Tuple[float, float]]): Scaling ratios and padding values
+                                                                         from preprocessing.
 
         Returns:
             List[Dict]: A list of dictionaries, each representing a detected object.
                         Each dict contains 'box' (xyxy), 'confidence', 'class_id', 'class_name'.
         """
-        # Raw output is (batch_size, num_attributes, num_predictions) -> (1, 7, 33600)
-        # Ultralytics: num_attributes = 4 (bbox) + nc (3 classes) = 7
-        
-        # We process a single image at a time (batch_size = 1)
-        predictions_single_image = raw_output[0] # Shape (7, 33600)
+        # 1. Convert numpy raw_output to torch.Tensor for ultralytics NMS
+        # raw_output is (batch_size, num_attributes, num_predictions) -> (1, 7, 33600)
+        torch_prediction = torch.from_numpy(raw_output)
 
-        # 1. Extract class scores (ultralytics 'xc' logic)
-        # Class scores are at indices 4, 5, 6
-        class_scores_raw = predictions_single_image[4:7, :] # Shape (3, 33600)
-        
-        # Max score across classes for each prediction
-        max_class_scores = np.max(class_scores_raw, axis=0) # Shape (33600,)
-        
-        # Filter by confidence threshold (like ultralytics 'xc')
-        candidates_mask = max_class_scores > confidence_threshold
-        
-        # Apply mask to filter predictions
-        predictions_filtered = predictions_single_image[:, candidates_mask] # Shape (7, num_candidates)
-        max_class_scores_filtered = max_class_scores[candidates_mask] # Shape (num_candidates,)
+        # 2. Call ultralytics's non_max_suppression function
+        # nc will be derived as prediction.shape[1] - 4 = 7 - 4 = 3
+        detections_torch_xyxy_scaled = non_max_suppression(
+            prediction=torch_prediction,
+            conf_thres=confidence_threshold,
+            iou_thres=iou_threshold,
+            nc=len(class_names), # Explicitly pass number of classes (3 for MDV6)
+            max_det=300 # Default max_det
+        )
 
-        if predictions_filtered.shape[1] == 0: # No candidates left
+        # detections_torch_xyxy_scaled is a list of tensors, one per image in batch.
+        # For batch_size=1, it will contain one tensor of shape (num_detections, 6)
+        # where 6 is (x1, y1, x2, y2, confidence, class_id)
+        
+        detections_np = []
+        if detections_torch_xyxy_scaled and len(detections_torch_xyxy_scaled[0]) > 0: # Check if there are detections
+            detections_np = detections_torch_xyxy_scaled[0].cpu().numpy() # Convert back to numpy
+
+        if len(detections_np) == 0:
             return []
 
-        # 2. Transpose to (num_candidates, num_attributes) for easier processing
-        # This makes it (num_candidates, 7)
-        predictions_transposed = predictions_filtered.transpose(1, 0)
-
-        # 3. Extract components from filtered, transposed predictions
-        boxes_xywh = predictions_transposed[:, :4] # (num_candidates, 4) in xywh
-        class_scores_filtered = predictions_transposed[:, 4:7] # (num_candidates, 3)
-
-        # 4. Convert xywh to xyxy
-        boxes_xyxy_unscaled = xywh2xyxy_np(boxes_xywh) # (num_candidates, 4) in xyxy
-
-        # 5. Get final confidence and class IDs
-        # max_class_scores_filtered is already the final confidence
-        final_scores = max_class_scores_filtered
-        class_ids = np.argmax(class_scores_filtered, axis=1) # (num_candidates,)
-
-        # 6. Scale bounding boxes to original image dimensions
-        input_h, input_w = input_shape[2], input_shape[3]
-        scale_w = original_dims[0] / input_w
-        scale_h = original_dims[1] / input_h
-
-        final_boxes_scaled = np.copy(boxes_xyxy_unscaled)
-        final_boxes_scaled[:, 0] = np.clip(final_boxes_scaled[:, 0] * scale_w, 0, original_dims[0])
-        final_boxes_scaled[:, 1] = np.clip(final_boxes_scaled[:, 1] * scale_h, 0, original_dims[1])
-        final_boxes_scaled[:, 2] = np.clip(final_boxes_scaled[:, 2] * scale_w, 0, original_dims[0])
-        final_boxes_scaled[:, 3] = np.clip(final_boxes_scaled[:, 3] * scale_h, 0, original_dims[1])
-
-        # 7. Apply Non-Maximum Suppression (NMS)
-        indices = cv2.dnn.NMSBoxes(
-            bboxes=final_boxes_scaled.tolist(), 
-            scores=final_scores.tolist(), 
-            score_threshold=confidence_threshold, # NMS uses score_threshold to filter boxes
-            nms_threshold=iou_threshold
-        )
+        # 3. Scale bounding boxes back to original image dimensions
+        # The detections from ultralytics NMS are already in xyxy format, but scaled to model input size (e.g., 1280x1280)
+        # We need to use ultralytics.utils.ops.scale_boxes for accurate unscaling.
         
-        detections = []
-        if len(indices) > 0:
-            for i in indices.flatten():
-                box = final_boxes_scaled[i]
-                score = final_scores[i]
-                class_id = class_ids[i]
-                detections.append({
-                    "box": [int(b) for b in box], # x1, y1, x2, y2
-                    "confidence": float(score),
-                    "class_id": int(class_id),
-                    "class_name": class_names.get(int(class_id), "unknown")
-                })
-        return detections
+        input_h, input_w = input_shape[2], input_shape[3]
+        original_h, original_w = original_dims[1], original_dims[0] # Note: original_dims is (width, height)
+
+        # boxes are xyxy format from ultralytics NMS output
+        boxes = detections_np[:, :4] 
+        scores = detections_np[:, 4]
+        class_ids = detections_np[:, 5]
+
+        # Use ultralytics's scaling function
+        # ops.scale_boxes signature: (img1_shape, boxes, img0_shape, ratio_pad=None, padding=True, xywh=False)
+        # img1_shape: (height, width) of the image *after* letterbox, which is (input_h, input_w)
+        # img0_shape: (height, width) of the original image
+        # ratio_pad: ((gain, gain), (pad_x, pad_y))
+        
+        # Convert boxes to torch tensor for scale_boxes
+        boxes_torch = torch.from_numpy(boxes).float()
+        
+        scaled_boxes_torch = scale_boxes(
+            img1_shape=(input_h, input_w), 
+            boxes=boxes_torch, 
+            img0_shape=(original_h, original_w),
+            ratio_pad=ratio_pad, # Pass ratio_pad
+            padding=True # Assuming padding was applied during LetterBox
+        )
+        # clip_boxes is called internally by scale_boxes
+        final_boxes_np = scaled_boxes_torch.cpu().numpy()
+
+        final_detections = []
+        for i in range(len(final_boxes_np)):
+            box = final_boxes_np[i]
+            score = scores[i]
+            class_id = class_ids[i]
+            final_detections.append({
+                "box": [int(b) for b in box], # x1, y1, x2, y2
+                "confidence": float(score),
+                "class_id": int(class_id),
+                "class_name": class_names.get(int(class_id), "unknown")
+            })
+
+        return final_detections
