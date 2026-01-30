@@ -1,0 +1,108 @@
+import torch
+import torch.nn as nn
+from ultralytics import YOLO # Import YOLO object
+import shutil # Import shutil for moving files
+import os # Import os for path manipulation
+from .onnx_exporter import ONNXExporter
+from typing import Literal
+
+from .yolov10_v9_output_converter import YOLOv10ToYOLOv9OutputConverter
+# Removed YOLOv10V9WrappedModel import as we will directly modify the ultralytics model
+
+class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
+    """
+    An ONNX exporter specifically for YOLOv10 models, that outputs a tensor
+    compatible with YOLOv9 raw output format.
+    """
+    def export(
+        self,
+        model: YOLO, # The raw ultralytics YOLO model
+        output_path: str,
+        input_shape: tuple = (1, 3, 1280, 1280),
+        opset_version: int = 18,
+        do_simplify: bool = False,
+        export_format: Literal["float32", "float16"] = "float32",
+        num_classes: int = 3, # Number of classes the YOLOv10 model detects
+        **kwargs
+    ) -> str:
+        """
+        Exports a YOLOv10 PyTorch model (ultralytics.YOLO object) to ONNX format,
+        with an output layer that converts its native output to a YOLOv9-compatible format.
+
+        Args:
+            model (YOLO): The ultralytics.YOLO model to export.
+            output_path (str): The desired path/filename for the ONNX model.
+            input_shape (tuple): The shape of the dummy input to the model (e.g., (1, 3, 1280, 1280)).
+            opset_version (int): The ONNX opset version to use.
+            do_simplify (bool): Whether to simplify the ONNX graph.
+            export_format (Literal["float32", "float16"]): The numeric format for export.
+            num_classes (int): The number of classes the YOLOv10 model is trained for.
+            **kwargs: Additional arguments to pass to model.export().
+
+        Returns:
+            str: The actual path to the exported ONNX model.
+        """
+        if not isinstance(model, YOLO):
+            raise TypeError("model must be an instance of ultralytics.YOLO")
+        
+        # 1. Extract the underlying PyTorch nn.Module from the ultralytics.YOLO model
+        original_yolov10_nn_module = model.model
+        
+        # 2. Create an instance of our converter module
+        converter_module = YOLOv10ToYOLOv9OutputConverter(num_classes=num_classes)
+
+        # 3. Temporarily patch the forward method of the original YOLOv10 nn.Module
+        original_forward = original_yolov10_nn_module.forward
+
+        def new_forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+            # Call the original YOLOv10 model's forward method
+            yolov10_native_output = original_forward(x, *args, **kwargs)
+
+            # Ensure output is a single tensor if it comes as a list/tuple
+            if isinstance(yolov10_native_output, (list, tuple)):
+                yolov10_native_output = yolov10_native_output[0]
+            
+            # Now pass through our converter
+            converted_output = converter_module(yolov10_native_output)
+            return converted_output
+        
+        try:
+            # Assign the patched forward method
+            original_yolov10_nn_module.forward = new_forward.__get__(original_yolov10_nn_module, type(original_yolov10_nn_module))
+
+            # Prepare arguments for ultralytics.YOLO.export method
+            export_kwargs = {
+                'format': 'onnx',
+                'imgsz': input_shape[2],
+                'batch': input_shape[0],
+                'simplify': do_simplify,
+                'opset': opset_version,
+                'workspace': 4,
+                'half': True if export_format == "float16" else False,
+                'int8': True if export_format == "int8" else False,
+                'name': os.path.basename(output_path),
+                'exist_ok': True,
+                'nms': False, # Force NMS to False for the raw output export
+                **kwargs
+            }
+
+            # Check for int8 support
+            if export_format == "int8":
+                raise NotImplementedError("Int8 export is not supported directly through ultralytics.YOLO.export without further quantization steps.")
+
+            print(f"Exporting YOLOv10 (v9 compatible output) model to ONNX using ultralytics.YOLO.export (format: {export_kwargs['format']}, opset: {export_kwargs['opset']}, nms={export_kwargs['nms']})...")
+            
+            exported_model_path_from_ultralytics = model.export(**export_kwargs)
+            print(f"Ultralytics exported model to: {exported_model_path_from_ultralytics}")
+                
+            # Move the file from where ultralytics saved it to our desired output_path
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            shutil.move(exported_model_path_from_ultralytics, output_path)
+            print(f"Final ONNX model moved to {output_path}")
+            return output_path
+        except Exception as e:
+            print(f"Error exporting YOLOv10 (v9 compatible output) model to ONNX: {e}")
+            raise
+        finally:
+            # Restore the original forward method
+            original_yolov10_nn_module.forward = original_forward

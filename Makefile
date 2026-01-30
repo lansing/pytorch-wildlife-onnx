@@ -63,5 +63,9 @@ demo:
 	@echo "--- Running ONNX image detector demo ---"
 	source $(VENV_DIR)/bin/activate && python $(PWE_DIR)/demo/onnx_image_detector_demo.py
 
+docs:
+	@echo "Documentation can be found in $(PWE_DIR)/docs/model_postprocessing.md"
+	@echo "You can open it with a Markdown viewer or editor."
+
 # Default target
 all: install test

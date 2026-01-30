@@ -12,7 +12,8 @@ if project_top_level not in sys.path:
     sys.path.insert(0, project_top_level)
 
 from PytorchWildlife_Export.inference_utils.onnx_inference import ONNXInferenceSession
-from PytorchWildlife_Export.postprocessors.yolov_postprocessor import YOLOvPostProcessor
+from PytorchWildlife_Export.postprocessors.yolov_postprocessor import YOLOvPostProcessor # For YOLOv9
+from PytorchWildlife_Export.postprocessors.yolov10_postprocessor import YOLOv10PostProcessor # For YOLOv10
 from PytorchWildlife_Export.postprocessors.ultralytics_baseline_utils import get_ultralytics_baseline_detections
 
 # --- Configuration ---
@@ -70,8 +71,7 @@ def visualize_detections(image_path: str, detections: List[Dict], output_path: s
 
 # --- Main Demo Logic ---
 def run_demo(model_paths: List[str]):
-    custom_post_processor = YOLOvPostProcessor()
-
+    
     for model_path in model_paths:
         model_filename = os.path.basename(model_path)
         print(f"\n--- Running Inference for model: {model_filename} ---")
@@ -79,6 +79,12 @@ def run_demo(model_paths: List[str]):
         print(f"Loading ONNX model from: {model_path}")
         inference_session = ONNXInferenceSession(onnx_model_path=model_path)
         
+        # Determine which post-processor to use based on model filename
+        if "yolov10" in model_filename.lower():
+            custom_post_processor = YOLOv10PostProcessor()
+        else: # Default to YOLOv9 post-processor for other ultralytics models
+            custom_post_processor = YOLOvPostProcessor()
+
         # --- Run with Custom Post-Processor ---
         output_image_custom_path = os.path.join(OUTPUT_DIR, f'detected_sample_image_{os.path.splitext(model_filename)[0]}_custom_pp.jpg')
         
@@ -99,7 +105,7 @@ def run_demo(model_paths: List[str]):
         # --- Run with Ultralytics Baseline (only for models originally exported by ultralytics) ---
         # The sample model might not be exportable by ultralytics.YOLO directly for baseline comparison
         # We assume for now that the baseline works for our newly exported raw model.
-        if "raw" in model_filename or "nms" in model_filename: # Heuristic to check if it's our exported model
+        if "raw" in model_filename or "nms" in model_filename: # Heuristic to check if it's our exported ultralytics model
             output_image_baseline_path = os.path.join(OUTPUT_DIR, f'detected_sample_image_{os.path.splitext(model_filename)[0]}_ultralytics_baseline.jpg')
             
             print("\n--- Running Inference with Ultralytics Baseline ---")
@@ -143,13 +149,15 @@ if __name__ == "__main__":
         DEFAULT_MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
         models_to_test = [
             os.path.join(DEFAULT_MODELS_DIR, 'sample_models', 'MDV6-yolov9-c-320-16b.onnx'), # Model 1: Provided sample
-            os.path.join(DEFAULT_MODELS_DIR, 'exported_models_test', 'MDV6-yolov9-c_1280x1280_raw.onnx') # Model 2: Newly exported raw
+            os.path.join(DEFAULT_MODELS_DIR, 'exported_models_test', 'MDV6-yolov9-c_1280x1280_raw.onnx'), # Model 2: Newly exported raw YOLOv9
+            os.path.join(DEFAULT_MODELS_DIR, 'exported_models_test', 'MDV6-yolov10-e_1280x1280_raw.onnx') # Model 3: Newly exported raw YOLOv10
         ]
         
-        # Ensure the exported model exists
-        if not os.path.exists(models_to_test[1]):
-            print(f"Error: Exported model not found at {models_to_test[1]}. Please run 'make export' first.")
-            sys.exit(1)
+        # Ensure all exported models exist
+        for model_path in models_to_test[1:]: # Check exported models only
+            if not os.path.exists(model_path):
+                print(f"Error: Exported model not found at {model_path}. Please run 'make export' (if it's the raw YOLOv9 model) and specific export commands for YOLOv10.")
+                sys.exit(1)
 
 
     run_demo(models_to_test)
