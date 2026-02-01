@@ -9,7 +9,7 @@ A friendly way to convert the awesome MegaDetectory V6 models to ONNX format, pa
 *   **Containerized:** Super streamlined export process from a contained environment, ensuring consistent results across platforms.
 *   **TUI:** Navigate complex export parameters with ease.
 
-<br><img width="1312" height="1094" alt="image" src="https://github.com/user-attachments/assets/9f9e18d7-cabb-4d43-aebd-c336f93b6b27" />
+<br><img width="640" height="533" alt="image" src="https://github.com/user-attachments/assets/9f9e18d7-cabb-4d43-aebd-c336f93b6b27" />
 
 
 ## Quickstart: Dockerized TUI Experience (Recommended)
