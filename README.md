@@ -1,8 +1,39 @@
-# PytorchWildlife Export Tools
+# pytorch-wildlife-onnx
 
-This repository contains custom scripts and utilities to export models from the PytorchWildlife project into various formats (specifically ONNX initially) and to run inference with the exported models.
+A friendly way to convert the awesome MegaDetectory V6 models to ONNX format, particularly aimed at use with Frigate, LightNVR and other NVR applications.
 
-## Quickstart
+**Key Features & Capabilities:**
+*   **MegaDetector v6 Support:** Seamlessly export the latest MegaDetector v6 models, including compact and extra versions of MDV6 YOLOv9 and YOLOv10.
+*   **YOLOv9 Compatibility for YOLOv10:** Intended for mpatibility with systems like Frigate, which may not support YOLOv10 model output (different from previous YOLOs) we provide a unique YOLOv10 export variant that mimics YOLOv9 output, crucial for existing inference pipelines.
+*   **Flexible Precision:** FP16 (half-precision) models for accelerated inference or robust FP32 (single-precision) models. Experimental INT8 quantization is also available for ultra-low latency scenarios (note: INT8 is currently not fully tested and not recommended for everyday use).
+*   **Containerized:** Super streamlined export process from a contained environment, ensuring consistent results across platforms.
+*   **TUI:** Navigate complex export parameters with ease.
+
+## Quickstart: Dockerized TUI Experience (Recommended)
+
+For the most streamlined and hassle-free model export, we highly recommend using our Dockerized TUI. This approach sets up all dependencies in a consistent environment and guides you through the export process with an intuitive Text-based User Interface.
+
+### 1. Prerequisites
+*   [Docker](https://docs.docker.com/get-docker/) installed and running on your system.
+
+### 2. Run the Dockerized TUI
+Navigate to the root of this repository in your terminal and execute the provided script:
+```bash
+./run_tui_in_docker.sh
+```
+This script will:
+*   Build a Docker image (named `pytorch-wildlife-export-tui`) for the first run, which may take a few minutes as it downloads and installs all dependencies. Subsequent runs will be much faster due to Docker's caching.
+*   Automatically create local `checkpoints` and `exported_models` directories (if they don't already exist).
+*   Launch the interactive TUI within a Docker container.
+*   Mount your local `checkpoints` directory to `/root/.cache/torch/hub/checkpoints` inside the container. This allows model weights to be downloaded once and reused across different exports or runs, saving bandwidth and time.
+*   Mount your local `exported_models` directory to `/exported_models` inside the container. All your exported ONNX models will be saved here and be accessible on your host machine.
+*   The TUI will automatically use `/exported_models` as the destination for your exported models, bypassing the interactive prompt for the output directory.
+
+Follow the on-screen prompts in the TUI to select your desired model type, version, format, and other export options. Once complete, your exported ONNX model(s) and associated class files will be available in your local `exported_models` directory.
+
+## Host Runtime Details: Manual Setup
+
+If you prefer to run the export tools directly on your host system without Docker, follow these steps for manual environment setup and execution of the CLI or TUI scripts.
 
 ### 1. Setup Environment
 Ensure you have `pyenv` installed. Then, set up your development environment by running:
@@ -11,7 +42,7 @@ make install
 ```
 This will install Python 3.11.8, set up a `uv` virtual environment, and install all necessary dependencies.
 
-### 2. Export a YOLOv9 Model (Raw Output)
+### 2. Export a Model via CLI
 You can export a `MegaDetectorV6 YOLOv9 compact` model to ONNX (float32, with simplification, *raw pre-NMS output*) using the `export_tool.py` CLI:
 ```bash
 source .venv/bin/activate
@@ -26,13 +57,20 @@ python PytorchWildlife_Export/export_tool.py \
 ```
 *(The model weights will be downloaded on first export if not present locally.)*
 
-### 3. Run the Inference Demo
+### 3. Use the Interactive TUI
+For an interactive experience on your host, you can run the TUI script directly after setting up the environment:
+```bash
+source .venv/bin/activate
+python PytorchWildlife_Export/tui_export.py
+```
+
+### 4. Run the Inference Demo
 After exporting a model, you can run the image detection demo:
 ```bash
 source .venv/bin/activate
 python PytorchWildlife_Export/demo/onnx_image_detector_demo.py
 ```
-This will load the `exported_models_test/MDV6-yolov9-c_1280x1280_raw.onnx` model, run inference on a sample image, and save two annotated images to `PytorchWildlife_Export/demo/demo_output/`: one with custom post-processing and one with the Ultralytics baseline.
+This will load the `exported_models_test/MDV6-yolov9-c_1280x1280_raw.onnx` model, run inference on `PytorchWildlife_Export/demo/sample_image.jpg`, and save two annotated images to `PytorchWildlife_Export/demo/demo_output/`: `detected_sample_image_custom_pp.jpg` (our custom post-processing) and `detected_sample_image_ultralytics_baseline.jpg` (Ultralytics' interpretation).
 
 ## Table of Contents
 1. [Setup](#setup)
