@@ -232,12 +232,18 @@ class ExecutionScreen(Screen):
         log_output = self.query_one("#log_output", Log)
         
         command = self.build_command()
-        self.query_one("#log_header").update(f"Running command:\n{' '.join(command)}\n")
+
+        log_output.write(f"Initiating export process...\n\n")
+        log_output.write(f"Command to be executed: {' '.join(command)}\n\n")
+        log_output.write("Please hold on, model weights might need to be downloaded, which can take a while.\n\n")
+
+        self.query_one("#log_header").update(f"Running command:\n{' '.join(command)}\n\n")
 
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=dict(os.environ, PYTHONUNBUFFERED="1") # Ensure unbuffered output
         )
 
         while True:
