@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+import argparse # Added argparse
 
 import yaml
 from textual import events
@@ -63,7 +64,6 @@ class BaseSelectionScreen(Screen):
         self.instruction = CONFIG["instructions"].get(key, "")
 
     def compose(self) -> ComposeResult:
-        #yield Header()
         yield Container(
             Label(self.heading, classes="heading"),
             Markdown(self.instruction),
@@ -135,20 +135,29 @@ class InputScreen(BaseSelectionScreen):
         self.max_val = CONFIG["ranges"][key].get("max") if self.input_type == "number" else None
 
     def compose(self) -> ComposeResult:
-        #yield Header()
         with Container(id="selection_container"):
-            #yield Label(self.heading, classes="heading")
             yield Markdown(self.instruction)
-            yield Input(
-                value=str(self.app.selections.get(self.key, "")),
-                placeholder=f"e.g., {self.app.selections.get(self.key, '')}",
-                type=self.input_type,
-                id=f"{self.key}_input",
-            )
-            yield Label("", id="validation_label")
-            yield Button("Next", variant="primary", id="next_button")
+            
+            if self.key == "output_dir" and self.app.output_dir_cli is not None:
+                yield Static(f"Output directory set via CLI: [b]{self.app.output_dir_cli}[/b]")
+            else:
+                yield Input(
+                    value=str(self.app.selections.get(self.key, "")),
+                    placeholder=f"e.g., {self.app.selections.get(self.key, '')}",
+                    type=self.input_type,
+                    id=f"{self.key}_input",
+                )
+                yield Label("", id="validation_label")
+                yield Button("Next", variant="primary", id="next_button")
         yield Footer()
 
+    def on_mount(self) -> None:
+        self.query_one(Container).border_title = self.heading # Added back
+        if self.key == "output_dir" and self.app.output_dir_cli is not None:
+            self.app.selections[self.key] = self.app.output_dir_cli
+            # Automatically advance to the next screen
+            self.call_after_refresh(self.app.push_screen, self.next_screen_callable())
+        
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "next_button":
             input_widget = self.query_one(f"#{self.key}_input", Input)
@@ -175,7 +184,6 @@ class SummaryScreen(Screen):
     """Screen to show a summary and run the export."""
 
     def compose(self) -> ComposeResult:
-        #yield Header()
         with Container(id="summary_container"):
             yield Label(CONFIG["headings"]["run_export"], classes="heading")
             yield Markdown(CONFIG["instructions"]["run_export"])
@@ -221,7 +229,6 @@ class ExecutionScreen(Screen):
     """Screen that runs the command and shows the output."""
 
     def compose(self) -> ComposeResult:
-        #yield Header()
         with VerticalScroll(id="log_container"):
             yield Static("Starting export...", id="log_header")
             yield Log(id="log_output")
@@ -294,9 +301,10 @@ class ExportTUI(App):
     CSS_PATH = "tui_style.css"
     BINDINGS = [("q", "request_quit", "Quit")]
 
-    def __init__(self, **kwargs):
+    def __init__(self, output_dir_cli: str = None, **kwargs):
         super().__init__(**kwargs)
         self.selections = self.load_defaults()
+        self.output_dir_cli = output_dir_cli
 
     def load_defaults(self):
         defaults = CONFIG["defaults"].copy()
@@ -339,6 +347,15 @@ class ExportTUI(App):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="PyTorch Wildlife ONNX Export TUI")
+    parser.add_argument(
+        "--output-dir-cli",
+        type=str,
+        default=None,
+        help="Specify an output directory from the CLI, bypassing interactive input."
+    )
+    args = parser.parse_args()
+
     # Workaround for pythonw on macOS
     if sys.platform == "darwin" and "pythonw" in sys.executable:
         subprocess.run([sys.executable.replace("pythonw", "python"), *sys.argv])
@@ -348,5 +365,5 @@ if __name__ == "__main__":
     os.chdir(Path(__file__).parent.parent)
 
     import asyncio
-    app = ExportTUI()
+    app = ExportTUI(output_dir_cli=args.output_dir_cli)
     app.run()

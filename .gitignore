@@ -37,6 +37,7 @@ exported_models_test/
 exported_models/
 demo_output/
 crop_output/
+checkpoints/
 
 # Logs and other temporary files
 *.log
@@ -53,7 +54,6 @@ crop_output/
 # IDE-specific files
 .idea/
 
-# Ignore sample_models directory
 sample_models/
 
 

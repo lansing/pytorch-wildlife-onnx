@@ -7,7 +7,7 @@ pyyaml
 wget
 tensorboard
 onnx
-onnx-simplifier
+onnxsim
 onnxscript
 onnxslim
 Pillow
