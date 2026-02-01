@@ -21,7 +21,7 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
         input_shape: tuple = (1, 3, 1280, 1280),
         opset_version: int = 18,
         do_simplify: bool = False,
-        export_format: Literal["float32", "float16"] = "float32",
+        export_format: Literal["float32", "float16", "int8", "uint8"] = "float32", # Added int8, uint8
         num_classes: int = 3, # Number of classes the YOLOv10 model detects
         **kwargs
     ) -> str:
@@ -79,27 +79,41 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
                 'opset': opset_version,
                 'workspace': 4,
                 'half': True if export_format == "float16" else False,
-                'int8': True if export_format == "int8" else False,
+                'int8': False, # Force False here, as we will do static quantization separately if requested
                 'name': os.path.basename(output_path),
                 'exist_ok': True,
                 'nms': False, # Force NMS to False for the raw output export
                 **kwargs
             }
 
-            # Check for int8 support
-            if export_format == "int8":
-                raise NotImplementedError("Int8 export is not supported directly through ultralytics.YOLO.export without further quantization steps.")
+
+            # Determine temporary path for the float model from ultralytics export
+            # Our ONNXExporter's _quantize_and_simplify_model expects this temporary float model.
+            if export_format in ["int8", "uint8"]:
+                temp_output_path_ultralytics = output_path.replace(".onnx", "_float.onnx")
+                export_kwargs['name'] = os.path.basename(temp_output_path_ultralytics)
+            else:
+                temp_output_path_ultralytics = output_path
 
             print(f"Exporting YOLOv10 (v9 compatible output) model to ONNX using ultralytics.YOLO.export (format: {export_kwargs['format']}, opset: {export_kwargs['opset']}, nms={export_kwargs['nms']})...")
             
             exported_model_path_from_ultralytics = model.export(**export_kwargs)
             print(f"Ultralytics exported model to: {exported_model_path_from_ultralytics}")
-                
-            # Move the file from where ultralytics saved it to our desired output_path
+
+            # Move the file from where ultralytics saved it to our designated temporary path
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            shutil.move(exported_model_path_from_ultralytics, output_path)
-            print(f"Final ONNX model moved to {output_path}")
-            return output_path
+            shutil.move(exported_model_path_from_ultralytics, temp_output_path_ultralytics)
+            print(f"Moved ultralytics exported float model to temporary path: {temp_output_path_ultralytics}")
+
+            # Now, call our ONNXExporter's helper to handle subsequent quantization and simplification
+            final_exported_path = self._quantize_and_simplify_model(
+                input_onnx_path=temp_output_path_ultralytics,
+                output_final_onnx_path=output_path,
+                export_format=export_format,
+                do_simplify=do_simplify,
+                input_shape=input_shape # Pass input_shape for CalibrationDataReader
+            )
+            return final_exported_path
         except Exception as e:
             print(f"Error exporting YOLOv10 (v9 compatible output) model to ONNX: {e}")
             raise
