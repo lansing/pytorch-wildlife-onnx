@@ -25,7 +25,7 @@ This script will:
 *   Build a Docker image (named `pytorch-wildlife-export-tui`) for the first run, which may take a few minutes.
 *   Automatically create local `checkpoints` and `exported_models` directories.
 *   Launch the interactive TUI within a Docker container.
-*   Automatically use `/exported_models` as the destination for your exported models
+*   Automatically use `exported_models` as the destination for your exported models
 
 Follow the on-screen prompts in the TUI to select your desired model type, version, format, and other export options. Once complete, your exported ONNX model(s) and associated class files will be available in your local `exported_models` directory.
 
