@@ -140,6 +140,18 @@ def main():
     
     if exported_path:
         print(f"Model successfully exported to: {exported_path}")
+
+        # Write class names file
+        class_names = ["animal", "person", "vehicle"]
+        class_names_file_path = os.path.join(os.path.dirname(exported_path), "md.classes.txt")
+        try:
+            with open(class_names_file_path, "w") as f:
+                for name in class_names:
+                    f.write(name + "\n")
+            print(f"Class names file created: {class_names_file_path}")
+        except Exception as e:
+            print(f"Error creating class names file: {e}")
+
     else:
         print("Model export failed.")
         sys.exit(1)
