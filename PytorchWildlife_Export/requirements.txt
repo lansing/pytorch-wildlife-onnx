@@ -12,3 +12,4 @@ onnxscript
 onnxslim
 Pillow
 opencv-python
+textual[dev]

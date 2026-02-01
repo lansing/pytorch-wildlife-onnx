@@ -1,0 +1,96 @@
+/* General App Styling */
+Screen {
+    align: center middle;
+    background: $panel;
+}
+
+/* Containers */
+#selection_container, #summary_container, #dialog {
+    width: 80;
+    max-width: 90%;
+    height: auto;
+    max-height: 90%;
+    background: $surface;
+    border: tall $primary;
+    padding: 1 2;
+    margin: 1 0;
+}
+
+#quit_screen_container {
+    align: center middle;
+    width: 100%;
+    height: 100%;
+}
+
+#dialog {
+    width: 40;
+    height: 10;
+    align: center middle;
+    border: thick $primary;
+}
+
+
+/* Headings and Instructions */
+.heading {
+    width: 100%;
+    text-align: center;
+    text-style: bold;
+    color: $primary;
+    margin-bottom: 1;
+}
+
+Markdown {
+    margin-bottom: 1;
+}
+
+
+/* Widgets */
+RadioSet {
+    margin: 1 0;
+}
+
+RadioButton {
+    padding: 0 2;
+}
+
+Input {
+    margin: 1 0;
+}
+
+Button {
+    width: 100%;
+    margin-top: 1;
+}
+
+#buttons {
+    width: 100%;
+    align: center middle;
+    margin-top: 1;
+}
+
+#buttons Button {
+    width: auto;
+    margin: 0 1;
+}
+
+
+/* Validation and Logs */
+#validation_label {
+    color: $error;
+    height: auto;
+    margin-top: 1;
+}
+
+#log_container {
+    width: 100%;
+    height: 100%;
+    background: $surface;
+    padding: 1;
+    border: tall $primary;
+}
+
+#log_header {
+    text-style: bold;
+    margin-bottom: 1;
+}
+

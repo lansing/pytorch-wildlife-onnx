@@ -1,0 +1,81 @@
+headings:
+  model_type: "Select Model Type"
+  model_version: "Select Model Version"
+  output_dir: "Output Directory"
+  format: "Select Export Format (Precision)"
+  input_img_size: "Input Image Size"
+  opset: "ONNX Opset Version"
+  simplify: "Simplify ONNX Model"
+  run_export: "Run Export"
+
+instructions:
+  model_type: "Choose the type of model you want to export."
+  model_version: "Choose the specific version of the selected model."
+  output_dir: "Enter the directory where the exported model will be saved."
+  format: |
+    Select the precision for the exported model.
+    'int8' is not well supported currently.
+  input_img_size: "Enter the input image size for the model (e.g., 640)."
+  opset: "Enter the ONNX opset version to use for the export."
+  simplify: "Enable this to simplify the exported ONNX model using onnx-simplifier."
+  run_export: "Review the selected options below and proceed to run the export."
+
+options:
+  model_type:
+    - value: 'yolov9'
+      label: 'YOLOv9'
+    - value: 'rtdetr'
+      label: 'RT-DETR'
+    - value: 'yolov10'
+      label: 'YOLOv10'
+    - value: 'yolov10_v9_compatible'
+      label: 'YOLOv10 (v9 compatible output)'
+  model_version:
+    yolov9:
+      - value: 'MDV6-yolov9-c'
+        label: 'MegaDetectorV6-Ultralytics-YoloV9-Compact'
+      - value: 'MDV6-yolov9-e'
+        label: 'MegaDetectorV6-Ultralytics-YoloV9-Extra'
+    rtdetr:
+      - value: 'MDV6-apa-rtdetr-c'
+        label: 'MegaDetectorV6-Apache-RTDetr-Compact'
+      - value: 'MDV6-apa-rtdetr-e'
+        label: 'MegaDetectorV6-Apache-RTDetr-Extra'
+    yolov10:
+      - value: 'MDV6-yolov10-c'
+        label: 'MegaDetectorV6-Ultralytics-YoloV10-Compact'
+      - value: 'MDV6-yolov10-e'
+        label: 'MegaDetectorV6-Ultralytics-YoloV10-Extra'
+    yolov10_v9_compatible:
+      - value: 'MDV6-yolov10-c'
+        label: 'MegaDetectorV6-Ultralytics-YoloV10-Compact'
+      - value: 'MDV6-yolov10-e'
+        label: 'MegaDetectorV6-Ultralytics-YoloV10-Extra'
+  format:
+    - value: 'float32'
+      label: 'FP32 (float32)'
+    - value: 'float16'
+      label: 'FP16 (float16)'
+    - value: 'int8'
+      label: 'INT8 (quantized)'
+  simplify:
+    - value: True
+      label: 'Yes'
+    - value: False
+      label: 'No'
+
+defaults:
+  model_type: 'yolov9'
+  output_dir: 'exported_models'
+  format: 'float16'
+  input_img_size: 640
+  opset: 18
+  simplify: True
+
+ranges:
+  input_img_size:
+    min: 128
+    max: 1280
+  opset:
+    min: 12
+    max: 22

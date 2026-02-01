@@ -110,7 +110,7 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
                 input_onnx_path=temp_output_path_ultralytics,
                 output_final_onnx_path=output_path,
                 export_format=export_format,
-                do_simplify=do_simplify,
+                do_simplify=False, # not necessary because we simplified at export
                 input_shape=input_shape # Pass input_shape for CalibrationDataReader
             )
             return final_exported_path

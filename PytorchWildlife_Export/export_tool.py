@@ -20,7 +20,7 @@ def main():
         "--model_type",
         type=str,
         required=True,
-        choices=["yolov9", "rtdetr", "yolov10_v9_compatible"], # Re-add yolov10_v9_compatible
+        choices=["yolov9", "rtdetr", "yolov10", "yolov10_v9_compatible"], 
         help="Type of the model to export (e.g., 'yolov9', 'rtdetr', 'yolov10_v9_compatible')."
     )
     parser.add_argument(
@@ -70,7 +70,7 @@ def main():
 
     # --- Load Model ---
     model_loader = None
-    if args.model_type == "yolov9" or args.model_type == "yolov10_v9_compatible": # YOLOv9Loader also handles YOLOv10 pt models
+    if args.model_type == "yolov9" or args.model_type =='yolov10' or args.model_type == "yolov10_v9_compatible": # YOLOv9Loader also handles YOLOv10 pt models
         model_loader = YoloV9Loader(version=args.model_version, device=args.device)
     elif args.model_type == "rtdetr":
         model_loader = RTDETRLoader(version=args.model_version, device=args.device)
@@ -84,7 +84,7 @@ def main():
 
     # --- Determine Input Shape ---
     input_shape = None
-    if args.model_type == "yolov9" or args.model_type == "yolov10_v9_compatible":
+    if args.model_type == "yolov9" or args.model_type == 'yolov10' or args.model_type == "yolov10_v9_compatible":
         # For ultralytics YOLO models, input_img_size directly maps to imgsz for export
         if args.input_img_size:
             input_shape = (1, 3, args.input_img_size, args.input_img_size)
@@ -104,7 +104,7 @@ def main():
 
     # --- Export Model ---
     exported_path = None
-    if args.model_type == "yolov9":
+    if args.model_type == "yolov9" or args.model_type == 'yolov10':
         model_exporter = YoloV9ONNXExporter()
         exported_path = model_exporter.export(
             model=model_pt, # YOLO object

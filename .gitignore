@@ -34,6 +34,7 @@ venv/
 
 # Built/exported files
 exported_models_test/
+exported_models/
 demo_output/
 crop_output/
 

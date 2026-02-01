@@ -41,7 +41,7 @@ class YoloV9Loader(BaseModelLoader):
         self.version = version
         self.device = device
 
-    def load_model(self) -> YOLO: # Changed return type to YOLO object
+    def load_model(self) -> YOLO:
         """
         Loads the YOLOv9 model directly using ultralytics and returns the ultralytics.YOLO object.
         """
