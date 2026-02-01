@@ -4,17 +4,17 @@ A friendly way to convert the awesome MegaDetectory V6 models to ONNX format, pa
 
 **Key Features & Capabilities:**
 *   **MegaDetector v6 Support:** Seamlessly export the latest MegaDetector v6 models, including compact and extra versions of MDV6 YOLOv9 and YOLOv10.
-*   **YOLOv9 Compatibility for YOLOv10:** Intended for mpatibility with systems like Frigate, which may not support YOLOv10 model output (different from previous YOLOs) we provide a unique YOLOv10 export variant that mimics YOLOv9 output, crucial for existing inference pipelines.
-*   **Flexible Precision:** FP16 (half-precision) models for accelerated inference or robust FP32 (single-precision) models. Experimental INT8 quantization is also available for ultra-low latency scenarios (note: INT8 is currently not fully tested and not recommended for everyday use).
+*   **YOLOv9 Compatibility for YOLOv10:** Intended for compatibility with systems like Frigate, which may not support YOLOv10 model output (different from previous YOLOs) we provide a unique YOLOv10 export variant that mimics YOLOv9 output, crucial for existing inference pipelines.
+*   **Precision Options:** FP16 by default for accelerated inference on most recent hardware, or FP32 if you prefer. Experimental INT8 quantization is also available (note: INT8 is currently not fully tested and not recommended for everyday use).
 *   **Containerized:** Super streamlined export process from a contained environment, ensuring consistent results across platforms.
 *   **TUI:** Navigate complex export parameters with ease.
 
 ## Quickstart: Dockerized TUI Experience (Recommended)
 
-For the most streamlined and hassle-free model export, we highly recommend using our Dockerized TUI. This approach sets up all dependencies in a consistent environment and guides you through the export process with an intuitive Text-based User Interface.
+For the most streamlined and hassle-free model export, we recommend using our Dockerized TUI.
 
 ### 1. Prerequisites
-*   [Docker](https://docs.docker.com/get-docker/) installed and running on your system.
+*   [Docker](https://docs.docker.com/get-docker/) or a compatible container runtime installed and running on your system.
 
 ### 2. Run the Dockerized TUI
 Navigate to the root of this repository in your terminal and execute the provided script:
@@ -22,19 +22,17 @@ Navigate to the root of this repository in your terminal and execute the provide
 ./run_tui_in_docker.sh
 ```
 This script will:
-*   Build a Docker image (named `pytorch-wildlife-export-tui`) for the first run, which may take a few minutes as it downloads and installs all dependencies. Subsequent runs will be much faster due to Docker's caching.
-*   Automatically create local `checkpoints` and `exported_models` directories (if they don't already exist).
+*   Build a Docker image (named `pytorch-wildlife-export-tui`) for the first run, which may take a few minutes.
+*   Automatically create local `checkpoints` and `exported_models` directories.
 *   Launch the interactive TUI within a Docker container.
-*   Mount your local `checkpoints` directory to `/root/.cache/torch/hub/checkpoints` inside the container. This allows model weights to be downloaded once and reused across different exports or runs, saving bandwidth and time.
-*   Mount your local `exported_models` directory to `/exported_models` inside the container. All your exported ONNX models will be saved here and be accessible on your host machine.
-*   The TUI will automatically use `/exported_models` as the destination for your exported models, bypassing the interactive prompt for the output directory.
+*   Automatically use `/exported_models` as the destination for your exported models
 
 Follow the on-screen prompts in the TUI to select your desired model type, version, format, and other export options. Once complete, your exported ONNX model(s) and associated class files will be available in your local `exported_models` directory.
 
 
 ## Frigate Configuration Suggestion
 
-Once you have exported your desired ONNX model (e.g., using the YOLOv10 compatible variant), you can integrate it into your Frigate `config.yaml`. Remember to copy your exported `.onnx` model and the generated `md.classes.txt` file to a location accessible by your Frigate container (e.g., `/media/frigate/models/`).
+Once you have exported your desired ONNX model, you can integrate it into your Frigate `config.yaml`. Remember to copy your exported `.onnx` model and the generated `md.classes.txt` file to a location accessible by your Frigate container (e.g., `/media/frigate/models/`).
 
 Here's a template for your Frigate `config.yaml` detector block:
 
@@ -52,8 +50,7 @@ objects:
   track:
     - person
     - animal
-    - vehicle # <--- IMPORTANT: Add this block if you want to track these classes
-  # ... other objects you might want to track ...
+    - vehicle # <--- IMPORTANT: Add this block to track MegaDetector classes
 ```
 *Note: Ensure the `path` and `labelmap_path` reflect the actual filenames and locations accessible within your Frigate container. Also, verify that `width` and `height` match the `input_img_size` chosen during the model export process.*
 
@@ -75,6 +72,8 @@ Choosing the right model and configuration for your Network Video Recorder (NVR)
     *   **Always use float16 models** unless you have a specific, known reason to opt for float32 (e.g., compatibility issues with older hardware/software, or extreme precision requirements that outweigh performance gains). Float16 generally offers superior performance with minimal impact on accuracy for detection tasks.
 
 ## Host Runtime Details: Manual Setup
+
+Most users can skip everything from here onward. 
 
 If you prefer to run the export tools directly on your host system without Docker, follow these steps for manual environment setup and execution of the CLI or TUI scripts.
 
