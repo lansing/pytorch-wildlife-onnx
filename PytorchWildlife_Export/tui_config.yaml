@@ -62,7 +62,7 @@ defaults:
   model_version: 'MDV6-yolov10-c'
   output_dir: 'exported_models'
   format: 'float16'
-  input_img_size: 640
+  input_img_size: 320
   opset: 18
   simplify: True
 
