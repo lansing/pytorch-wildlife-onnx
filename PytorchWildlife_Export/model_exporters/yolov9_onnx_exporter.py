@@ -1,7 +1,7 @@
 import torch.nn as nn
-from ultralytics import YOLO # Import YOLO object
-import shutil # Import shutil for moving files
-import os # Import os for path manipulation
+from ultralytics import YOLO
+import shutil
+import os
 from .onnx_exporter import ONNXExporter
 from typing import Literal
 
@@ -11,12 +11,12 @@ class YoloV9ONNXExporter(ONNXExporter):
     """
     def export(
         self,
-        model: YOLO, # The raw ultralytics YOLO model
+        model: YOLO,
         output_path: str,
         input_shape: tuple = (1, 3, 1280, 1280),
         opset_version: int = 18,
         do_simplify: bool = False,
-        export_format: Literal["float32", "float16", "int8", "uint8"] = "float32", # Added int8, uint8
+        export_format: Literal["float32", "float16", "int8", "uint8"] = "float32",
         **kwargs
     ) -> str:
         """
@@ -37,15 +37,14 @@ class YoloV9ONNXExporter(ONNXExporter):
         if not isinstance(model, YOLO):
             raise TypeError("model must be an instance of ultralytics.YOLO")
         
-        # Prepare arguments for ultralytics.YOLO.export method for initial float32 export
         export_kwargs_ultralytics = {
             'format': 'onnx',
             'imgsz': input_shape[2],
             'batch': input_shape[0],
-            'simplify': do_simplify, # Ultralytics can simplify during its export (optional)
+            'simplify': do_simplify,
             'opset': opset_version,
             'workspace': 4,
-            'half': True if export_format == "float16" else False, # Ultralytics can export to float16
+            'half': True if export_format == "float16" else False,
             'int8': False, # Force False here, as we will do static quantization separately if requested
             'name': os.path.basename(output_path),
             'exist_ok': True,

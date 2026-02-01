@@ -3,8 +3,6 @@ import cv2
 import torch # Keep torch for now to convert numpy array to torch tensor for non_max_suppression_np
 from typing import List, Dict, Tuple, Any
 
-# Reimplement ultralytics's ops and nms functions in numpy
-# Helper function inspired by ultralytics.utils.ops.xywh2xyxy
 def xywh2xyxy_np(x: np.ndarray) -> np.ndarray:
     """
     Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format.
@@ -19,7 +17,6 @@ def xywh2xyxy_np(x: np.ndarray) -> np.ndarray:
     y[..., 3] = xy[..., 1] + wh_half[..., 1] # y2
     return y
 
-# Helper function inspired by ultralytics.utils.ops.clip_boxes
 def clip_boxes_np(boxes: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
     """Clip bounding boxes to image boundaries (Numpy version)."""
     h, w = shape[:2]
@@ -27,7 +24,6 @@ def clip_boxes_np(boxes: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
     boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, h)  # y1, y2
     return boxes
 
-# Helper function inspired by ultralytics.utils.ops.scale_boxes
 def scale_boxes_np(
     img1_shape: Tuple[int, int], # (height, width) of the image *after* letterbox
     boxes: np.ndarray, # Bounding boxes in xyxy format, scaled to img1_shape
@@ -49,8 +45,6 @@ def scale_boxes_np(
 
     return clip_boxes_np(boxes, img0_shape)
 
-# Helper function inspired by ultralytics.utils.nms.non_max_suppression (simplified)
-# This will be the most complex part to reimplement accurately.
 def non_max_suppression_np(
     prediction: np.ndarray, # (num_predictions, num_attributes) -> (33600, 7)
     conf_thres: float = 0.25,
@@ -60,9 +54,6 @@ def non_max_suppression_np(
     agnostic: bool = False, # Whether to perform class-agnostic NMS.
 ) -> List[np.ndarray]: # Returns a list of detections, each np.ndarray (N, 6)
     
-    # Reimplement the core logic from ultralytics.utils.nms.non_max_suppression for numpy
-    # This will be a simplified version focusing on our specific output format (7 attributes)
-
     # 1. Split prediction into boxes and class scores
     # prediction: (num_predictions, 7)
     # 4 (bbox) + 3 (class scores)

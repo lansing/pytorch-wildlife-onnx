@@ -8,7 +8,6 @@ from ultralytics.utils.nms import non_max_suppression # Used for reference, not 
 
 from PytorchWildlife_Export.postprocessors.base_postprocessor import BasePostProcessor
 
-# Helper functions (reimplemented from ultralytics for full ownership)
 def xywh2xyxy_np(x: np.ndarray) -> np.ndarray:
     """
     Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format.
@@ -51,7 +50,6 @@ def scale_boxes_np(
 
     return clip_boxes_np(boxes, img0_shape)
 
-# Helper function inspired by ultralytics.utils.nms.non_max_suppression (simplified)
 def non_max_suppression_np(
     prediction: np.ndarray, # (num_predictions, num_attributes) -> (33600, 7)
     conf_thres: float = 0.25,

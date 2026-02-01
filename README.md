@@ -6,11 +6,10 @@ A friendly way to convert the awesome MegaDetectory V6 models to ONNX format, pa
 *   **MegaDetector v6 Support:** Seamlessly export the latest MegaDetector v6 models, including compact and extra versions of MDV6 YOLOv9 and YOLOv10.
 *   **YOLOv9 Compatibility for YOLOv10:** Intended for compatibility with systems like Frigate, which may not support YOLOv10 model output (different from previous YOLOs) we provide a unique YOLOv10 export variant that mimics YOLOv9 output, crucial for existing inference pipelines.
 *   **Precision Options:** FP16 by default for accelerated inference on most recent hardware, or FP32 if you prefer. Experimental INT8 quantization is also available (note: INT8 is currently not fully tested and not recommended for everyday use).
-*   **Containerized:** Super streamlined export process from a contained environment, ensuring consistent results across platforms.
+*   **Containerized:** Streamlined export process from a containerized environment for consistent results across platforms.
 *   **TUI:** Navigate complex export parameters with ease.
 
-<br>
-![Buck](buck.jpg)
+<br><img width="640" height="533" alt="image" src="https://github.com/user-attachments/assets/9f9e18d7-cabb-4d43-aebd-c336f93b6b27" />
 
 ## Quickstart: Dockerized TUI Experience (Recommended)
 
@@ -61,7 +60,7 @@ objects:
 
 Choosing the right model and configuration for your object detection needs is crucial for balancing performance and accuracy. Here are some general guidelines:
 
-*   **General Quickstart:** For most users, we suggest starting with the **YOLOv10 compact model in YOLOv9 compatible format**, exported at **float16 precision**. This offers a good balance of performance and compatibility.
+*   **General Recommendation:** For most users, we suggest starting with the **YOLOv10 compact model in YOLOv9 compatible format**, exported at **float16 precision**. This offers a good balance of performance and compatibility.
 *   **Older Intel iGPU (8th-14th Gen) or Low-Power Edge AI Accelerators (e.g., Edge TPU):**
     *   Consider using the **compact models at 320px input size**.
     *   The YOLOv10 compact model, with its approximately 2.3 million parameters, is an exceptionally efficient choice for these environments.

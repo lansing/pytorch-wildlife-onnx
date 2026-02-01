@@ -34,7 +34,7 @@ class YOLOv10ToYOLOv9OutputConverter(nn.Module):
         """
         batch_size, num_detections, _ = yolov10_output.shape
 
-        # 1. Extract components
+        # Extract components
         # Using slicing instead of split to maintain tensor dimensions and avoid potential tracing issues
         x1 = yolov10_output[..., 0:1]
         y1 = yolov10_output[..., 1:2]
@@ -43,13 +43,13 @@ class YOLOv10ToYOLOv9OutputConverter(nn.Module):
         confidence = yolov10_output[..., 4:5]
         class_id = yolov10_output[..., 5:6]
 
-        # 2. Convert xyxy to xywh
+        # Convert xyxy to xywh
         xc = (x1 + x2) / 2
         yc = (y1 + y2) / 2
         w = x2 - x1
         h = y2 - y1
         
-        # 3. Create class score vectors
+        # Create class score vectors
         # Initialize with zeros (B, N, num_classes)
         class_scores = torch.zeros(batch_size, num_detections, self.num_classes, device=yolov10_output.device)
         
@@ -59,11 +59,11 @@ class YOLOv10ToYOLOv9OutputConverter(nn.Module):
         # scatter_ expects source and index to have compatible shapes
         class_scores.scatter_(dim=-1, index=class_id.long(), src=confidence)
         
-        # 4. Concatenate boxes (xywh) and class scores
+        # Concatenate boxes (xywh) and class scores
         # Resulting shape: (B, N, 4 + num_classes) -> (B, N, 7)
         yolov9_compatible_output_flat = torch.cat([xc, yc, w, h, class_scores], dim=-1)
 
-        # 5. Transpose to (B, 7, N)
+        # Transpose to (B, 7, N)
         # This matches the (batch_size, num_attributes, num_predictions) format of YOLOv9
         yolov9_compatible_output = yolov9_compatible_output_flat.transpose(1, 2)
 

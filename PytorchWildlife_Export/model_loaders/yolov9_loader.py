@@ -3,7 +3,7 @@ import sys
 import torch.nn as nn
 import wget
 from ultralytics import YOLO
-import torch # Import torch to use torch.hub.get_dir()
+import torch 
 
 from .base_loader import BaseModelLoader
 
@@ -11,7 +11,6 @@ class YoloV9Loader(BaseModelLoader):
     """
     A loader for the MegaDetectorV6 YOLOv9 model using the ultralytics library directly.
     """
-    # Define model versions and their corresponding URLs/names
     MODEL_CONFIGS = {
         'MDV6-yolov9-c': {
             'url': "https://zenodo.org/records/15398270/files/MDV6-yolov9-c.pt?download=1",

@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 import onnx
 import onnxsim
-from typing import Literal, Union, Tuple, List, Dict # Import List, Dict
-import numpy as np # Import numpy
+from typing import Literal, Union, Tuple, List, Dict
+import numpy as np
 
-import onnxruntime.quantization # Import for quantization
-from onnxruntime.quantization import quantize_dynamic, quantize_static, QuantType, CalibrationDataReader # Explicitly import
+import onnxruntime.quantization
+from onnxruntime.quantization import quantize_dynamic, quantize_static, QuantType, CalibrationDataReader
 
 from .base_exporter import BaseONNXExporter
 
@@ -52,9 +52,9 @@ class ONNXExporter(BaseONNXExporter):
         opset_version: int = 18,
         do_simplify: bool = False,
         export_format: Literal["float32", "float16", "int8", "uint8"] = "float32",
-        input_names: List[str] = None, # Added as direct arg
-        output_names: List[str] = None, # Added as direct arg
-        dynamic_axes: Dict[str, Dict[int, str]] = None, # Added as direct arg
+        input_names: List[str] = None,
+        output_names: List[str] = None,
+        dynamic_axes: Dict[str, Dict[int, str]] = None,
         **kwargs
     ) -> str:
         """

@@ -1,13 +1,12 @@
 import torch
 import torch.nn as nn
-from ultralytics import YOLO # Import YOLO object
-import shutil # Import shutil for moving files
-import os # Import os for path manipulation
+from ultralytics import YOLO
+import shutil
+import os
 from .onnx_exporter import ONNXExporter
 from typing import Literal
 
 from .yolov10_v9_output_converter import YOLOv10ToYOLOv9OutputConverter
-# Removed YOLOv10V9WrappedModel import as we will directly modify the ultralytics model
 
 class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
     """
@@ -16,13 +15,13 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
     """
     def export(
         self,
-        model: YOLO, # The raw ultralytics YOLO model
+        model: YOLO,
         output_path: str,
         input_shape: tuple = (1, 3, 1280, 1280),
         opset_version: int = 18,
         do_simplify: bool = False,
-        export_format: Literal["float32", "float16", "int8", "uint8"] = "float32", # Added int8, uint8
-        num_classes: int = 3, # Number of classes the YOLOv10 model detects
+        export_format: Literal["float32", "float16", "int8", "uint8"] = "float32",
+        num_classes: int = 3,
         **kwargs
     ) -> str:
         """
@@ -45,17 +44,14 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
         if not isinstance(model, YOLO):
             raise TypeError("model must be an instance of ultralytics.YOLO")
         
-        # 1. Extract the underlying PyTorch nn.Module from the ultralytics.YOLO model
         original_yolov10_nn_module = model.model
         
-        # 2. Create an instance of our converter module
         converter_module = YOLOv10ToYOLOv9OutputConverter(num_classes=num_classes)
 
-        # 3. Temporarily patch the forward method of the original YOLOv10 nn.Module
+        # Temporarily patch the forward method of the original YOLOv10 nn.Module
         original_forward = original_yolov10_nn_module.forward
 
         def new_forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-            # Call the original YOLOv10 model's forward method
             yolov10_native_output = original_forward(x, *args, **kwargs)
 
             # Ensure output is a single tensor if it comes as a list/tuple
@@ -70,7 +66,6 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
             # Assign the patched forward method
             original_yolov10_nn_module.forward = new_forward.__get__(original_yolov10_nn_module, type(original_yolov10_nn_module))
 
-            # Prepare arguments for ultralytics.YOLO.export method
             export_kwargs = {
                 'format': 'onnx',
                 'imgsz': input_shape[2],
@@ -85,7 +80,6 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
                 'nms': False, # Force NMS to False for the raw output export
                 **kwargs
             }
-
 
             # Determine temporary path for the float model from ultralytics export
             # Our ONNXExporter's _quantize_and_simplify_model expects this temporary float model.

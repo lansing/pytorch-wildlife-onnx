@@ -24,8 +24,6 @@ options:
   model_type:
     - value: 'yolov9'
       label: 'YOLOv9'
-    - value: 'rtdetr'
-      label: 'RT-DETR'
     - value: 'yolov10'
       label: 'YOLOv10'
     - value: 'yolov10_v9_compatible'
@@ -36,11 +34,6 @@ options:
         label: 'MegaDetectorV6-Ultralytics-YoloV9-Compact'
       - value: 'MDV6-yolov9-e'
         label: 'MegaDetectorV6-Ultralytics-YoloV9-Extra'
-    rtdetr:
-      - value: 'MDV6-apa-rtdetr-c'
-        label: 'MegaDetectorV6-Apache-RTDetr-Compact'
-      - value: 'MDV6-apa-rtdetr-e'
-        label: 'MegaDetectorV6-Apache-RTDetr-Extra'
     yolov10:
       - value: 'MDV6-yolov10-c'
         label: 'MegaDetectorV6-Ultralytics-YoloV10-Compact'
@@ -65,7 +58,8 @@ options:
       label: 'No'
 
 defaults:
-  model_type: 'yolov9'
+  model_type: 'yolov10_v9_compatible'
+  model_version: 'MDV6-yolov10-c'
   output_dir: 'exported_models'
   format: 'float16'
   input_img_size: 640
