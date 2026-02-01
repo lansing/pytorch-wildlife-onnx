@@ -63,7 +63,7 @@ class BaseSelectionScreen(Screen):
         self.instruction = CONFIG["instructions"].get(key, "")
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        #yield Header()
         yield Container(
             Label(self.heading, classes="heading"),
             Markdown(self.instruction),
@@ -88,9 +88,9 @@ class ChoiceSelectionScreen(BaseSelectionScreen):
         self._id_to_value = {}
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        #yield Header()
         with Container(id="selection_container"):
-            yield Label(self.heading, classes="heading")
+            #yield Label(self.heading, classes="heading")
             yield Markdown(self.instruction)
             options = self.get_options()
             with RadioSet(id=f"{self.key}_radioset"):
@@ -135,9 +135,9 @@ class InputScreen(BaseSelectionScreen):
         self.max_val = CONFIG["ranges"][key].get("max") if self.input_type == "number" else None
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        #yield Header()
         with Container(id="selection_container"):
-            yield Label(self.heading, classes="heading")
+            #yield Label(self.heading, classes="heading")
             yield Markdown(self.instruction)
             yield Input(
                 value=str(self.app.selections.get(self.key, "")),
@@ -175,7 +175,7 @@ class SummaryScreen(Screen):
     """Screen to show a summary and run the export."""
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        #yield Header()
         with Container(id="summary_container"):
             yield Label(CONFIG["headings"]["run_export"], classes="heading")
             yield Markdown(CONFIG["instructions"]["run_export"])
@@ -221,7 +221,7 @@ class ExecutionScreen(Screen):
     """Screen that runs the command and shows the output."""
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        #yield Header()
         with VerticalScroll(id="log_container"):
             yield Static("Starting export...", id="log_header")
             yield Log(id="log_output")
@@ -233,11 +233,12 @@ class ExecutionScreen(Screen):
         
         command = self.build_command()
 
-        log_output.write(f"Initiating export process...\n\n")
-        log_output.write(f"Command to be executed: {' '.join(command)}\n\n")
-        log_output.write("Please hold on, model weights might need to be downloaded, which can take a while.\n\n")
+        log_output.write(f"Initiating export process...\n")
+        log_output.write(f"Command to be executed: {' '.join(command)}\n")
+        log_output.write("Please hold on, model weights might need to be downloaded, which can take a while.\n")
+        await asyncio.sleep(1) # Give Textual a moment to render the above messages
 
-        self.query_one("#log_header").update(f"Running command:\n{' '.join(command)}\n\n")
+        self.query_one("#log_header").update(f"Running command:\n{' '.join(command)}") # Removed extra \n
 
         process = await asyncio.create_subprocess_exec(
             *command,
