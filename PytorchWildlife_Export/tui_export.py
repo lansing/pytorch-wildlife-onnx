@@ -212,9 +212,13 @@ class SummaryScreen(Screen):
 
     def get_output_path(self) -> str:
         selections = self.app.selections
-        filename = \
-            f"{selections['model_version']}_{selections['format']}_" + \
-            f"{selections['input_img_size']}.onnx"
+        filename_base = (
+            f"{selections['model_version']}_{selections['format']}_" +
+            f"{selections['input_img_size']}"
+        )
+        if selections['model_type'] == 'yolov10_v9_compatible':
+            filename_base += '_v9_compat'
+        filename = f"{filename_base}.onnx"
         return os.path.join(selections['output_dir'], filename)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
