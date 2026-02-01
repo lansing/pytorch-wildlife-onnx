@@ -23,9 +23,9 @@ Navigate to the root of this repository in your terminal and execute the provide
 ```
 This script will:
 *   Build a Docker image (named `pytorch-wildlife-export-tui`) for the first run, which may take a few minutes.
-*   Automatically create local `checkpoints` and `exported_models` directories.
+*   Create local `checkpoints` and `exported_models` directories.
 *   Launch the interactive TUI within a Docker container.
-*   Automatically use `exported_models` as the destination for your exported models
+*   Use `exported_models` as the destination for your exported models and class metadata
 
 Follow the on-screen prompts in the TUI to select your desired model type, version, format, and other export options. Once complete, your exported ONNX model(s) and associated class files will be available in your local `exported_models` directory.
 
@@ -43,7 +43,7 @@ model:
   height: 640 # <--- IMPORTANT: Match this to your export --input_img_size
   input_tensor: nchw
   input_dtype: float
-  path: /models/MDV6-yolov10-e_640_float16_v9_compatible_2.onnx # <--- IMPORTANT: Update with your ONNX model filename
+  path: /models/MDV6-yolov10-c_float16_640_v9_compat.onnx # <--- IMPORTANT: Update with your ONNX model filename
   labelmap_path: /models/md.classes.txt # <--- IMPORTANT: Ensure this path is correct
 
 objects:
@@ -56,7 +56,7 @@ objects:
 
 ## Model Selection Recommendations for NVR Detectors (Frigate etc)
 
-Choosing the right model and configuration for your Network Video Recorder (NVR) detection needs is crucial for balancing performance and accuracy. Here are some general guidelines:
+Choosing the right model and configuration for your object detection needs is crucial for balancing performance and accuracy. Here are some general guidelines:
 
 *   **General Quickstart:** For most users, we suggest starting with the **YOLOv10 compact model in YOLOv9 compatible format**, exported at **float16 precision**. This offers a good balance of performance and compatibility.
 *   **Older Intel iGPU (8th-14th Gen) or Low-Power Edge AI Accelerators (e.g., Edge TPU):**
