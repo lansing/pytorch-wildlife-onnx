@@ -31,6 +31,49 @@ This script will:
 
 Follow the on-screen prompts in the TUI to select your desired model type, version, format, and other export options. Once complete, your exported ONNX model(s) and associated class files will be available in your local `exported_models` directory.
 
+
+## Frigate Configuration Suggestion
+
+Once you have exported your desired ONNX model (e.g., using the YOLOv10 compatible variant), you can integrate it into your Frigate `config.yaml`. Remember to copy your exported `.onnx` model and the generated `md.classes.txt` file to a location accessible by your Frigate container (e.g., `/media/frigate/models/`).
+
+Here's a template for your Frigate `config.yaml` detector block:
+
+```yaml
+model:
+  model_type: yolo-generic
+  width: 640  # <--- IMPORTANT: Match this to your export --input_img_size
+  height: 640 # <--- IMPORTANT: Match this to your export --input_img_size
+  input_tensor: nchw
+  input_dtype: float
+  path: /models/MDV6-yolov10-e_640_float16_v9_compatible_2.onnx # <--- IMPORTANT: Update with your ONNX model filename
+  labelmap_path: /models/md.classes.txt # <--- IMPORTANT: Ensure this path is correct
+
+objects:
+  track:
+    - person
+    - animal
+    - vehicle # <--- IMPORTANT: Add this block if you want to track these classes
+  # ... other objects you might want to track ...
+```
+*Note: Ensure the `path` and `labelmap_path` reflect the actual filenames and locations accessible within your Frigate container. Also, verify that `width` and `height` match the `input_img_size` chosen during the model export process.*
+
+## Model Selection Recommendations for NVR Detectors (Frigate etc)
+
+Choosing the right model and configuration for your Network Video Recorder (NVR) detection needs is crucial for balancing performance and accuracy. Here are some general guidelines:
+
+*   **General Quickstart:** For most users, we suggest starting with the **YOLOv10 compact model in YOLOv9 compatible format**, exported at **float16 precision**. This offers a good balance of performance and compatibility.
+*   **Older Intel iGPU (8th-14th Gen) or Low-Power Edge AI Accelerators (e.g., Edge TPU):**
+    *   Consider using the **compact models at 320px input size**.
+    *   The YOLOv10 compact model, with its approximately 2.3 million parameters, is an exceptionally efficient choice for these environments.
+*   **Current-Gen Intel iGPU or Low-Power Workstation GPUs:**
+    *   It is generally feasible to run **compact models at 640px** input size.
+    *   Alternatively, **extra models at 320px** can also provide good performance.
+    *   Running extra models at 640px might be acceptable if you can tolerate slightly higher latency.
+*   **Dedicated Discrete GPUs (from 2018 onwards):**
+    *   Any "full fat" discrete GPU from this era should comfortably run **extra models at 640px or higher** without significant performance issues.
+*   **Precision (float16 vs. float32):**
+    *   **Always use float16 models** unless you have a specific, known reason to opt for float32 (e.g., compatibility issues with older hardware/software, or extreme precision requirements that outweigh performance gains). Float16 generally offers superior performance with minimal impact on accuracy for detection tasks.
+
 ## Host Runtime Details: Manual Setup
 
 If you prefer to run the export tools directly on your host system without Docker, follow these steps for manual environment setup and execution of the CLI or TUI scripts.
@@ -168,6 +211,7 @@ source .venv/bin/activate
 python PytorchWildlife_Export/demo/onnx_image_detector_demo.py
 ```
 The script will load the `exported_models_test/MDV6-yolov9-c_1280x1280_raw.onnx` model, run inference on `PytorchWildlife_Export/demo/sample_image.jpg`, and save two annotated images to `PytorchWildlife_Export/demo/demo_output/`: `detected_sample_image_custom_pp.jpg` (our custom post-processing) and `detected_sample_image_ultralytics_baseline.jpg` (Ultralytics' interpretation).
+
 
 ---
 **Development Notes:**
