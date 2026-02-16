@@ -1,6 +1,8 @@
+from typing import Tuple
+
 import torch
 import torch.nn as nn
-from typing import Tuple
+
 
 class YOLOv10ToYOLOv9OutputConverter(nn.Module):
     """
@@ -13,12 +15,15 @@ class YOLOv10ToYOLOv9OutputConverter(nn.Module):
     This module will convert the 6 attributes into 7 attributes and transpose the output.
     The num_proposals will be num_detections from YOLOv10 output.
     """
+
     def __init__(self, num_classes: int = 3):
         super().__init__()
         self.num_classes = num_classes
         if self.num_classes != 3:
             # The current YOLOv9 postprocessor assumes 3 classes
-            raise NotImplementedError("Currently only supports 3 classes for YOLOv9 output compatibility.")
+            raise NotImplementedError(
+                "Currently only supports 3 classes for YOLOv9 output compatibility."
+            )
 
     def forward(self, yolov10_output: torch.Tensor) -> torch.Tensor:
         """
@@ -48,17 +53,19 @@ class YOLOv10ToYOLOv9OutputConverter(nn.Module):
         yc = (y1 + y2) / 2
         w = x2 - x1
         h = y2 - y1
-        
+
         # Create class score vectors
         # Initialize with zeros (B, N, num_classes)
-        class_scores = torch.zeros(batch_size, num_detections, self.num_classes, device=yolov10_output.device)
-        
+        class_scores = torch.zeros(
+            batch_size, num_detections, self.num_classes, device=yolov10_output.device
+        )
+
         # Populate class score for the detected class with its confidence
         # Use scatter_ to place confidence at the class_id index
         # class_id needs to be long for scatter_
         # scatter_ expects source and index to have compatible shapes
         class_scores.scatter_(dim=-1, index=class_id.long(), src=confidence)
-        
+
         # Concatenate boxes (xywh) and class scores
         # Resulting shape: (B, N, 4 + num_classes) -> (B, N, 7)
         yolov9_compatible_output_flat = torch.cat([xc, yc, w, h, class_scores], dim=-1)
