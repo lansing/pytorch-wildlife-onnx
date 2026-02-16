@@ -1,9 +1,8 @@
-
+import argparse  # Added argparse
 import os
 import subprocess
 import sys
 from pathlib import Path
-import argparse # Added argparse
 
 import yaml
 from textual import events
@@ -12,8 +11,8 @@ from textual.containers import Container, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
-    Header,
     Footer,
+    Header,
     Input,
     Label,
     Log,
@@ -26,7 +25,9 @@ from textual.widgets import (
 try:
     CONFIG = yaml.safe_load(Path("PytorchWildlife_Export/tui_config.yaml").read_text())
 except FileNotFoundError:
-    print("Error: tui_config.yaml not found. Make sure it's in the PytorchWildlife_Export directory.")
+    print(
+        "Error: tui_config.yaml not found. Make sure it's in the PytorchWildlife_Export directory."
+    )
     sys.exit(1)
 
 
@@ -44,7 +45,7 @@ class QuitScreen(ModalScreen):
                 ),
                 id="dialog",
             ),
-            id="quit_screen_container"
+            id="quit_screen_container",
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -67,7 +68,7 @@ class BaseSelectionScreen(Screen):
         yield Container(
             Label(self.heading, classes="heading"),
             Markdown(self.instruction),
-            id="selection_container"
+            id="selection_container",
         )
         yield Footer()
 
@@ -88,9 +89,9 @@ class ChoiceSelectionScreen(BaseSelectionScreen):
         self._id_to_value = {}
 
     def compose(self) -> ComposeResult:
-        #yield Header()
+        # yield Header()
         with Container(id="selection_container"):
-            #yield Label(self.heading, classes="heading")
+            # yield Label(self.heading, classes="heading")
             yield Markdown(self.instruction)
             options = self.get_options()
             with RadioSet(id=f"{self.key}_radioset"):
@@ -99,7 +100,7 @@ class ChoiceSelectionScreen(BaseSelectionScreen):
                     self._id_to_value[option_id] = option["value"]
                     radio_button = RadioButton(option["label"], id=option_id)
                     if self.app.selections.get(self.key) == option["value"]:
-                         radio_button.value = True
+                        radio_button.value = True
                     yield radio_button
             yield Button("Next", variant="primary", id="next_button")
         yield Footer()
@@ -131,15 +132,21 @@ class InputScreen(BaseSelectionScreen):
         super().__init__(key, **kwargs)
         self.next_screen_callable = next_screen_callable
         self.input_type = "number" if key in ["input_img_size", "opset"] else "text"
-        self.min_val = CONFIG["ranges"][key].get("min") if self.input_type == "number" else None
-        self.max_val = CONFIG["ranges"][key].get("max") if self.input_type == "number" else None
+        self.min_val = (
+            CONFIG["ranges"][key].get("min") if self.input_type == "number" else None
+        )
+        self.max_val = (
+            CONFIG["ranges"][key].get("max") if self.input_type == "number" else None
+        )
 
     def compose(self) -> ComposeResult:
         with Container(id="selection_container"):
             yield Markdown(self.instruction)
-            
+
             if self.key == "output_dir" and self.app.output_dir_cli is not None:
-                yield Static(f"Output directory set via CLI: [b]{self.app.output_dir_cli}[/b]")
+                yield Static(
+                    f"Output directory set via CLI: [b]{self.app.output_dir_cli}[/b]"
+                )
             else:
                 yield Input(
                     value=str(self.app.selections.get(self.key, "")),
@@ -152,18 +159,20 @@ class InputScreen(BaseSelectionScreen):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one(Container).border_title = self.heading # Added back
+        self.query_one(Container).border_title = self.heading  # Added back
         if self.key == "output_dir" and self.app.output_dir_cli is not None:
             self.app.selections[self.key] = self.app.output_dir_cli
             # Automatically advance to the next screen
             self.call_after_refresh(self.app.push_screen, self.next_screen_callable())
-        
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "next_button":
             input_widget = self.query_one(f"#{self.key}_input", Input)
             value = input_widget.value
             if self.validate(value):
-                self.app.selections[self.key] = int(value) if self.input_type == "number" else value
+                self.app.selections[self.key] = (
+                    int(value) if self.input_type == "number" else value
+                )
                 self.app.push_screen(self.next_screen_callable())
             else:
                 self.query_one("#validation_label").update(
@@ -187,43 +196,43 @@ class SummaryScreen(Screen):
         with Container(id="summary_container"):
             yield Label(CONFIG["headings"]["run_export"], classes="heading")
             yield Markdown(CONFIG["instructions"]["run_export"])
-            
+
             summary_text = self.get_summary_text()
             yield Markdown(summary_text, id="summary_markdown")
 
             yield Button("Run Export", variant="success", id="run_button")
             yield Button("Back", id="back_button")
         yield Footer()
-        
+
     def get_summary_text(self) -> str:
         selections = self.app.selections
         output_path = self.get_output_path()
 
         return f"""
-- **Model Type**: `{selections['model_type']}`
-- **Model Version**: `{selections['model_version']}`
-- **Output Directory**: `{selections['output_dir']}`
+- **Model Type**: `{selections["model_type"]}`
+- **Model Version**: `{selections["model_version"]}`
+- **Output Directory**: `{selections["output_dir"]}`
 - **Output Path**: `{output_path}`
-- **Format**: `{selections['format']}`
-- **Input Image Size**: `{selections['input_img_size']}`
-- **Opset Version**: `{selections['opset']}`
-- **Simplify Model**: `{selections['simplify']}`
+- **Format**: `{selections["format"]}`
+- **Input Image Size**: `{selections["input_img_size"]}`
+- **Opset Version**: `{selections["opset"]}`
+- **Simplify Model**: `{selections["simplify"]}`
 """
 
     def get_output_path(self) -> str:
         selections = self.app.selections
         filename_base = (
-            f"{selections['model_version']}_{selections['format']}_" +
-            f"{selections['input_img_size']}"
+            f"{selections['model_version']}_{selections['format']}_"
+            + f"{selections['input_img_size']}"
         )
-        if selections['model_type'] == 'yolov10_v9_compatible':
-            filename_base += '_v9_compat'
+        if selections["model_type"] == "yolov10_v9_compatible":
+            filename_base += "_v9_compat"
         filename = f"{filename_base}.onnx"
-        return os.path.join(selections['output_dir'], filename)
+        return os.path.join(selections["output_dir"], filename)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run_button":
-            self.app.selections['output_path'] = self.get_output_path()
+            self.app.selections["output_path"] = self.get_output_path()
             self.app.push_screen(ExecutionScreen())
         elif event.button.id == "back_button":
             self.app.pop_screen()
@@ -240,43 +249,43 @@ class ExecutionScreen(Screen):
 
     async def on_mount(self) -> None:
         """Run the export command."""
-        log_output = self.query_one("#log_output", Log)
-        
         command = self.build_command()
+        self.query_one("#log_header").update(" ".join(command))
+        self.run_worker(self.execute_command(command), thread=False, exclusive=True)
 
-        log_output.write(f"Initiating export process...\n")
-        log_output.write(f"Command to be executed: {' '.join(command)}\n")
-        log_output.write("Please hold on, model weights might need to be downloaded, which can take a while.\n")
-        await asyncio.sleep(1) # Give Textual a moment to render the above messages
-
-        self.query_one("#log_header").update(f"Running command:\n{' '.join(command)}") # Removed extra \n
+    async def execute_command(self, command) -> None:
+        log_output = self.query_one("#log_output", Log)
+        log_output.write(
+            "Model weights might need to be downloaded, which can take a while. Please hold...\n"
+        )
 
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=dict(os.environ, PYTHONUNBUFFERED="1") # Ensure unbuffered output
+            env=dict(os.environ, PYTHONUNBUFFERED="1"),  # Ensure unbuffered output
         )
 
         while True:
             line_bytes = await process.stdout.readline()
             if not line_bytes:
                 break
-            line = line_bytes.decode('utf-8', errors='replace')
+            line = line_bytes.decode("utf-8", errors="replace")
             log_output.write(line)
-            
+
         await process.wait()
 
         if process.returncode == 0:
             self.query_one("#log_header").update("Export completed successfully!")
         else:
-            self.query_one("#log_header").update(f"Export failed with exit code {process.returncode}.")
+            self.query_one("#log_header").update(
+                f"Export failed with exit code {process.returncode}."
+            )
 
         self.query_one("VerticalScroll").scroll_end(animate=True)
         # Add a button to exit
         container = self.query_one("#log_container")
         await container.mount(Button("Exit", variant="primary", id="exit_button"))
-
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "exit_button":
@@ -287,12 +296,18 @@ class ExecutionScreen(Screen):
         cmd = [
             "python",
             "PytorchWildlife_Export/export_tool.py",
-            "--model_type", selections["model_type"],
-            "--model_version", selections["model_version"],
-            "--output_path", selections["output_path"],
-            "--format", selections["format"],
-            "--input_img_size", str(selections["input_img_size"]),
-            "--opset", str(selections["opset"]),
+            "--model_type",
+            selections["model_type"],
+            "--model_version",
+            selections["model_version"],
+            "--output_path",
+            selections["output_path"],
+            "--format",
+            selections["format"],
+            "--input_img_size",
+            str(selections["input_img_size"]),
+            "--opset",
+            str(selections["opset"]),
         ]
         if selections["simplify"]:
             cmd.append("--simplify")
@@ -314,7 +329,9 @@ class ExportTUI(App):
         defaults = CONFIG["defaults"].copy()
         # Set a default for model_version based on default model_type
         default_model_type = defaults["model_type"]
-        defaults["model_version"] = CONFIG["options"]["model_version"][default_model_type][0]["value"]
+        defaults["model_version"] = CONFIG["options"]["model_version"][
+            default_model_type
+        ][0]["value"]
         return defaults
 
     def on_mount(self) -> None:
@@ -326,7 +343,7 @@ class ExportTUI(App):
 
     def get_model_version_screen(self):
         return ChoiceSelectionScreen("model_version", self.get_output_dir_screen)
-    
+
     def get_output_dir_screen(self):
         return InputScreen("output_dir", self.get_format_screen)
 
@@ -356,7 +373,7 @@ if __name__ == "__main__":
         "--output-dir-cli",
         type=str,
         default=None,
-        help="Specify an output directory from the CLI, bypassing interactive input."
+        help="Specify an output directory from the CLI, bypassing interactive input.",
     )
     args = parser.parse_args()
 
@@ -369,5 +386,6 @@ if __name__ == "__main__":
     os.chdir(Path(__file__).parent.parent)
 
     import asyncio
+
     app = ExportTUI(output_dir_cli=args.output_dir_cli)
     app.run()

@@ -17,7 +17,9 @@ mkdir -p "$LOCAL_EXPORTED_MODELS_DIR"
 
 echo "Building Docker image: $IMAGE_NAME..."
 # Build the Docker image
-docker build --no-cache -t "$IMAGE_NAME" .
+# TODO add back --no-cache for distribution
+#docker build --no-cache -t "$IMAGE_NAME" .
+docker build --build-arg CACHE_BUSTER=$(date +%s) -t "$IMAGE_NAME" .
 
 if [ $? -ne 0 ]; then
     echo "Docker image build failed. Exiting."
