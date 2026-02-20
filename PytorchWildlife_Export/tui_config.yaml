@@ -6,6 +6,9 @@ headings:
   input_img_size: "Input Image Size"
   opset: "ONNX Opset Version"
   simplify: "Simplify ONNX Model"
+  allow_denormalized: "Allow Denormalized Input (0-255)"
+  allow_nhwc: "Allow NHWC Input Layout"
+  allow_uint8: "Allow uint8 Input"
   run_export: "Run Export"
 
 instructions:
@@ -18,6 +21,18 @@ instructions:
   input_img_size: "Enter the input image size for the model (e.g., 640)."
   opset: "Enter the ONNX opset version to use for the export."
   simplify: "Enable this to simplify the exported ONNX model using onnx-simplifier."
+  allow_denormalized: |
+    If enabled, the model will accept pixel values in the range **0–255** (float)
+    instead of the default **0.0–1.0**. A `/255` normalization layer is inserted
+    at the start of the model.
+  allow_nhwc: |
+    If enabled, the model will accept tensors in **NHWC** layout (batch, height,
+    width, channels) instead of the default **NCHW** layout. A transpose op is
+    inserted at the start of the model. The exported input shape changes accordingly.
+  allow_uint8: |
+    If enabled, the model's input tensor dtype is changed to **uint8**. A cast to
+    float32 is inserted at the start of the model. Combine with *Allow Denormalized*
+    to accept raw 0-255 uint8 pixel data.
   run_export: "Review the selected options below and proceed to run the export."
 
 options:
@@ -56,6 +71,21 @@ options:
       label: 'Yes'
     - value: False
       label: 'No'
+  allow_denormalized:
+    - value: False
+      label: 'No  — model expects 0.0–1.0 float input (default)'
+    - value: True
+      label: 'Yes — model accepts 0–255 float input'
+  allow_nhwc:
+    - value: False
+      label: 'No  — model expects NCHW layout (default)'
+    - value: True
+      label: 'Yes — model accepts NHWC layout'
+  allow_uint8:
+    - value: False
+      label: 'No  — model expects float32 input (default)'
+    - value: True
+      label: 'Yes — model accepts uint8 input'
 
 defaults:
   model_type: 'yolov10_v9_compatible'
@@ -65,6 +95,9 @@ defaults:
   input_img_size: 320
   opset: 18
   simplify: True
+  allow_denormalized: False
+  allow_nhwc: False
+  allow_uint8: False
 
 ranges:
   input_img_size:

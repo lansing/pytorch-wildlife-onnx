@@ -19,7 +19,7 @@ install:
 	@echo "--- Creating and activating virtual environment with uv ---"
 	uv venv
 	@echo "--- Installing Python dependencies ---"
-	$(VENV_DIR)/bin/uv pip install -r $(PWE_DIR)/requirements.txt
+	uv pip install -r $(PWE_DIR)/requirements.txt
 	@echo "--- Setup complete. Activate with: source $(VENV_DIR)/bin/activate ---"
 
 uninstall:

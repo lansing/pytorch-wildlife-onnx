@@ -208,6 +208,15 @@ class SummaryScreen(Screen):
         selections = self.app.selections
         output_path = self.get_output_path()
 
+        preproc_parts = []
+        if selections.get("allow_denormalized"):
+            preproc_parts.append("denormalized (0-255)")
+        if selections.get("allow_nhwc"):
+            preproc_parts.append("NHWC layout")
+        if selections.get("allow_uint8"):
+            preproc_parts.append("uint8 dtype")
+        preproc_str = ", ".join(preproc_parts) if preproc_parts else "none"
+
         return f"""
 - **Model Type**: `{selections["model_type"]}`
 - **Model Version**: `{selections["model_version"]}`
@@ -217,6 +226,7 @@ class SummaryScreen(Screen):
 - **Input Image Size**: `{selections["input_img_size"]}`
 - **Opset Version**: `{selections["opset"]}`
 - **Simplify Model**: `{selections["simplify"]}`
+- **Input Preprocessing**: `{preproc_str}`
 """
 
     def get_output_path(self) -> str:
@@ -227,6 +237,12 @@ class SummaryScreen(Screen):
         )
         if selections["model_type"] == "yolov10_v9_compatible":
             filename_base += "_v9_compat"
+        if selections.get("allow_denormalized"):
+            filename_base += "_denorm"
+        if selections.get("allow_nhwc"):
+            filename_base += "_nhwc"
+        if selections.get("allow_uint8"):
+            filename_base += "_uint8"
         filename = f"{filename_base}.onnx"
         return os.path.join(selections["output_dir"], filename)
 
@@ -311,6 +327,12 @@ class ExecutionScreen(Screen):
         ]
         if selections["simplify"]:
             cmd.append("--simplify")
+        if selections.get("allow_denormalized"):
+            cmd.append("--allow_denormalized")
+        if selections.get("allow_nhwc"):
+            cmd.append("--allow_nhwc")
+        if selections.get("allow_uint8"):
+            cmd.append("--allow_uint8")
         return cmd
 
 
@@ -357,7 +379,16 @@ class ExportTUI(App):
         return InputScreen("opset", self.get_simplify_screen)
 
     def get_simplify_screen(self):
-        return ChoiceSelectionScreen("simplify", self.get_summary_screen)
+        return ChoiceSelectionScreen("simplify", self.get_allow_denormalized_screen)
+
+    def get_allow_denormalized_screen(self):
+        return ChoiceSelectionScreen("allow_denormalized", self.get_allow_nhwc_screen)
+
+    def get_allow_nhwc_screen(self):
+        return ChoiceSelectionScreen("allow_nhwc", self.get_allow_uint8_screen)
+
+    def get_allow_uint8_screen(self):
+        return ChoiceSelectionScreen("allow_uint8", self.get_summary_screen)
 
     def get_summary_screen(self):
         return SummaryScreen()

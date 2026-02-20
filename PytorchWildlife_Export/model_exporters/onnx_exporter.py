@@ -4,9 +4,11 @@ from typing import Dict, List, Literal, Tuple, Union
 import numpy as np
 import onnx
 import onnxruntime.quantization
-import onnxsim
+
+# import onnxsim
 import torch
 import torch.nn as nn
+from onnxconverter_common import float16
 from onnxruntime.quantization import (
     CalibrationDataReader,
     QuantType,
@@ -185,6 +187,10 @@ class ONNXExporter(BaseONNXExporter):
             # Ensure output directory exists for quantized model
             os.makedirs(os.path.dirname(output_final_onnx_path), exist_ok=True)
 
+            # TODO for this:
+            # figure out calibration data
+            # preprocess
+            # try dynamic quant
             quantize_static(
                 model_input=current_model_path,
                 model_output=output_final_onnx_path,  # Quantize directly to final path
@@ -201,31 +207,35 @@ class ONNXExporter(BaseONNXExporter):
                 os.remove(input_onnx_path)
             current_model_path = output_final_onnx_path  # Update current path
         elif export_format == "float16":
-            # If float16 is requested, and ultralytics didn't handle it,
-            # we need to convert the float32 model to float16 here.
-            # This is not directly supported by onnxruntime.quantization.quantize_static
-            # but can be done using onnx.checker and onnx.convert.
-            # For now, we will assume float16 conversion is handled by the original exporter.
-            # If not, the model will remain float32.
-            # However, ultralytics.YOLO.export() actually handles 'half' argument, so it would
-            # have already exported to float16 if 'half=True' was passed.
-            # So, current_model_path would already be float16.
-            pass  # No specific action needed here if already float16
+            # This assumes we have not converted it already via ultralytics export.
+            # TODO stop using ultralytics export entirely...
+            print(f"Converting model to {export_format}...")
+            os.makedirs(os.path.dirname(output_final_onnx_path), exist_ok=True)
+            onnx_model = onnx.load(current_model_path)
+            model_fp16 = float16.convert_float_to_float16(
+                onnx_model,
+                keep_io_types=True,
+            )
+            onnx.save(model_fp16, output_final_onnx_path)
+            if input_onnx_path != output_final_onnx_path:
+                os.remove(input_onnx_path)
+            current_model_path = output_final_onnx_path  # Update current path
 
-        # 2. Simplification (if requested)
-        if do_simplify:
-            print("Simplifying ONNX model...")
-            try:
-                onnx_model = onnx.load(current_model_path)
-                model_simplified, check = onnxsim.simplify(onnx_model)
-                if check:
-                    onnx.save(
-                        model_simplified, current_model_path
-                    )  # Save back to current path
-                    print("ONNX model simplified successfully.")
-                else:
-                    print("ONNX model simplification failed due to consistency check.")
-            except Exception as e:
-                print(f"Error simplifying ONNX model: {e}")
+        # TODO use onnxslim instead
+        # # 2. Simplification (if requested)
+        # if do_simplify:
+        #     print("Simplifying ONNX model...")
+        #     try:
+        #         onnx_model = onnx.load(current_model_path)
+        #         model_simplified, check = onnxsim.simplify(onnx_model)
+        #         if check:
+        #             onnx.save(
+        #                 model_simplified, current_model_path
+        #             )  # Save back to current path
+        #             print("ONNX model simplified successfully.")
+        #         else:
+        #             print("ONNX model simplification failed due to consistency check.")
+        #     except Exception as e:
+        #         print(f"Error simplifying ONNX model: {e}")
 
         return current_model_path  # Return path to the final model
