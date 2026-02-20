@@ -1,6 +1,6 @@
 import math
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -34,10 +34,11 @@ class ONNXInferenceSession:
 
     def __init__(self, onnx_model_path: str, normalize: bool = True):
         self.onnx_model_path = onnx_model_path
-        self.session: ort.InferenceSession = None
-        self.input_name = None
-        self.input_shape = None  # [batch_size, channels, height, width]
-        self.output_name = None
+        self.session: Optional[ort.InferenceSession] = None
+        self.input_name: Optional[str] = None
+        self.input_shape: Optional[list] = None  # [batch_size, channels, height, width]
+        self.input_type: Optional[str] = None
+        self.output_name: Optional[str] = None
         self.normalize = normalize
 
         self._load_model()
@@ -54,6 +55,7 @@ class ONNXInferenceSession:
 
         self.input_name = input_meta.name
         self.input_shape = input_meta.shape  # e.g., [1, 3, 1280, 1280]
+        self.input_type = input_meta.type
         self.output_name = output_meta.name
 
         if self.input_shape[1] > self.input_shape[3]:
@@ -63,7 +65,7 @@ class ONNXInferenceSession:
 
         print(f"ONNX Model loaded via onnxruntime: {self.onnx_model_path}")
         print(
-            f"Input Name: {self.input_name}, Input Shape: {self.input_shape}, Tensor format: {self.tensor_format}"
+            f"Input Name: {self.input_name}, Input Shape: {self.input_shape}, Tensor format: {self.tensor_format}, Dtype: {self.input_type}"
         )
         print(f"Output Name: {self.output_name}")
 
@@ -156,8 +158,10 @@ class ONNXInferenceSession:
         if self.normalize:
             preprocessed_image = padded_image.astype(np.float32) / 255.0
         else:
-            # TODO add uint8 support as well
-            preprocessed_image = padded_image.astype(np.float32)
+            if self.input_type and "uint8" in self.input_type:
+                preprocessed_image = padded_image
+            else:
+                preprocessed_image = padded_image.astype(np.float32)
 
         # 3. Transpose to BCHW
         if self.tensor_format == "nchw":
