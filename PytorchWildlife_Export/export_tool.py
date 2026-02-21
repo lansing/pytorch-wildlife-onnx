@@ -119,7 +119,8 @@ def main():
         sys.exit(1)
 
     # --- Export Model ---
-    exported_path = None
+    exported_path = args.output_path
+    os.makedirs(os.path.dirname(exported_path), exist_ok=True)
 
     if args.model_type in ("yolov9", "yolov10"):
         model_exporter = YoloV9ONNXExporter()
@@ -153,8 +154,6 @@ def main():
             nhwc_input=args.nhwc_input,
             denormalized_input=args.denormalized_input
         )
-
-    exported_path = args.output_path
 
     print(f"Model successfully exported to: {exported_path}")
 

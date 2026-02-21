@@ -209,11 +209,11 @@ class SummaryScreen(Screen):
         output_path = self.get_output_path()
 
         preproc_parts = []
-        if selections.get("allow_denormalized"):
+        if selections.get("denormalized_input"):
             preproc_parts.append("denormalized (0-255)")
-        if selections.get("allow_nhwc"):
+        if selections.get("nhwc_input"):
             preproc_parts.append("NHWC layout")
-        if selections.get("allow_uint8"):
+        if selections.get("uint8_input"):
             preproc_parts.append("uint8 dtype")
         preproc_str = ", ".join(preproc_parts) if preproc_parts else "none"
 
@@ -237,12 +237,12 @@ class SummaryScreen(Screen):
         )
         if selections["model_type"] == "yolov10_v9_compatible":
             filename_base += "_v9_compat"
-        if selections.get("allow_denormalized"):
+        if selections.get("denormalized_input"):
             filename_base += "_denorm"
-        if selections.get("allow_nhwc"):
+        if selections.get("nhwc_input"):
             filename_base += "_nhwc"
-        if selections.get("allow_uint8"):
-            filename_base += "_uint8"
+        if selections.get("uint8_input"):
+            filename_base += "_uint8input"
         filename = f"{filename_base}.onnx"
         return os.path.join(selections["output_dir"], filename)
 
@@ -260,7 +260,7 @@ class ExecutionScreen(Screen):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="log_container"):
             yield Static("Starting export...", id="log_header")
-            yield Log(id="log_output")
+            yield Log(id="log_output", )
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -327,12 +327,12 @@ class ExecutionScreen(Screen):
         ]
         if selections["simplify"]:
             cmd.append("--simplify")
-        if selections.get("allow_denormalized"):
-            cmd.append("--allow_denormalized")
-        if selections.get("allow_nhwc"):
-            cmd.append("--allow_nhwc")
-        if selections.get("allow_uint8"):
-            cmd.append("--allow_uint8")
+        if selections.get("denormalized_input"):
+            cmd.append("--denormalized_input")
+        if selections.get("nhwc_input"):
+            cmd.append("--nhwc_input")
+        if selections.get("uint8_input"):
+            cmd.append("--uint8_input")
         return cmd
 
 
@@ -382,13 +382,13 @@ class ExportTUI(App):
         return ChoiceSelectionScreen("simplify", self.get_allow_denormalized_screen)
 
     def get_allow_denormalized_screen(self):
-        return ChoiceSelectionScreen("allow_denormalized", self.get_allow_nhwc_screen)
+        return ChoiceSelectionScreen("denormalized_input", self.get_allow_nhwc_screen)
 
     def get_allow_nhwc_screen(self):
-        return ChoiceSelectionScreen("allow_nhwc", self.get_allow_uint8_screen)
+        return ChoiceSelectionScreen("nhwc_input", self.get_allow_uint8_screen)
 
     def get_allow_uint8_screen(self):
-        return ChoiceSelectionScreen("allow_uint8", self.get_summary_screen)
+        return ChoiceSelectionScreen("uint8_input", self.get_summary_screen)
 
     def get_summary_screen(self):
         return SummaryScreen()
