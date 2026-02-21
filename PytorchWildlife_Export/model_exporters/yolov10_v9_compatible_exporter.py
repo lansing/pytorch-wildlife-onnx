@@ -8,44 +8,44 @@ import torch.nn as nn
 from ultralytics import YOLO
 
 from .input_preprocessing_wrapper import InputPreprocessingWrapper
-from .onnx_exporter import ONNXExporter
+from .util import merge_onnx_models
+from .yolo_exporter import YOLOExporter
 from .yolov10_v9_output_converter import YOLOv10ToYOLOv9OutputConverter
 
 
-def merge_onnx_models(m_1, m_2, prefix1, prefix2):
-    if isinstance(m_1, str):
-        m_1 = onnx.load(m_1)
-    if isinstance(m_2, str):
-        m_2 = onnx.load(m_2)
 
-    m_1_output_name = [node.name for node in m_1.graph.output][0]
-    m_2_input_name = [node.name for node in m_2.graph.input][0]
-
-    for m in [m_1, m_2]:
-        input_all = [node.name for node in m.graph.input]
-        output_all = [node.name for node in m.graph.output]
-        print("Inputs:", input_all)
-        print("Outputs:", output_all)
-        ir_version = getattr(m, "ir_version", 0)
-        print(f"ir_version: {ir_version}")
-
-    merged_model = onnx.compose.merge_models(
-        m_1,
-        m_2,
-        io_map=[(m_1_output_name, m_2_input_name)],
-        prefix1=prefix1,
-        prefix2=prefix2,
-    )
-    return merged_model
-
-
-class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
+class YOLOv10V9CompatibleONNXExporter(YOLOExporter):
     """
     An ONNX exporter specifically for YOLOv10 models, that outputs a tensor
     compatible with YOLOv9 raw output format.
     """
 
-    def export(
+    def do_your_merges(self, yolo_output_shape, onnx_base_model_path, num_classes, opset_version):
+        converter_module = YOLOv10ToYOLOv9OutputConverter(num_classes=num_classes)
+        converter_module.eval()
+        tmp_output_path = "/tmp/yolo_v10v9_merged.onnx"
+
+        yolov10_output = torch.zeros(yolo_output_shape)
+
+        torch.onnx.export(
+            converter_module,
+            args=(yolov10_output,),
+            opset_version=opset_version,
+            f=tmp_output_path,
+            dynamo=False,  # match ultralytics, otherwise IR changes
+        )
+
+        merged_model = merge_onnx_models(
+            onnx_base_model_path,
+            tmp_output_path,
+            prefix1="YOLOV10",
+            prefix2="YOLOv10ToYOLOv9OutputConverter",
+        )
+
+        return merged_model
+
+
+    def export_old(
         self,
         model: YOLO,
         output_path: str,
@@ -77,8 +77,6 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
         if not isinstance(model, YOLO):
             raise TypeError("model must be an instance of ultralytics.YOLO")
 
-        original_yolov10_nn_module = model.model
-
         converter_module = YOLOv10ToYOLOv9OutputConverter(num_classes=num_classes)
         converter_module.eval()
 
@@ -91,7 +89,6 @@ class YOLOv10V9CompatibleONNXExporter(ONNXExporter):
             #
             #
             yolov10_output = model.model(torch.zeros(input_shape))[0]
-            print(f"yolov10_output shape: {yolov10_output.shape}")
 
             export_kwargs = {
                 "format": "onnx",

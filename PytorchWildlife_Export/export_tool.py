@@ -12,13 +12,13 @@ if project_top_level not in sys.path:
 from PytorchWildlife_Export.model_exporters.input_preprocessing_wrapper import (
     InputPreprocessingWrapper,
 )
-from PytorchWildlife_Export.model_exporters.onnx_exporter import ONNXExporter
-from PytorchWildlife_Export.model_exporters.rtdetr_onnx_exporter import (
-    RTDETRONNXExporter,
-)
-from PytorchWildlife_Export.model_exporters.yolov9_onnx_exporter import (
-    YoloV9ONNXExporter,
-)
+# from PytorchWildlife_Export.model_exporters.onnx_exporter import ONNXExporter
+# from PytorchWildlife_Export.model_exporters.rtdetr_onnx_exporter import (
+#     RTDETRONNXExporter,
+# )
+# from PytorchWildlife_Export.model_exporters.yolov9_onnx_exporter import (
+#     YoloV9ONNXExporter,
+# )
 from PytorchWildlife_Export.model_exporters.yolov10_v9_compatible_exporter import (
     YOLOv10V9CompatibleONNXExporter,
 )
@@ -299,7 +299,6 @@ def main():
         exported_path = model_exporter.export(
             model=model_pt,
             output_path=args.output_path,
-            preprocessor=preprocessor,
             input_shape=input_shape,
             opset_version=args.opset,
             do_simplify=args.simplify,
@@ -307,18 +306,21 @@ def main():
             num_classes=len(model_pt.model.names)
             if hasattr(model_pt.model, "names")
             else 3,
+            allow_uint8=args.allow_uint8,
+            allow_nhwc=args.allow_nhwc,
+            allow_denormalized=args.allow_denormalized
         )
-    elif args.model_type == "rtdetr":
-        model_exporter = RTDETRONNXExporter()
-        exported_path = model_exporter.export(
-            model=model_pt,
-            output_path=args.output_path,
-            input_shape=input_shape,
-            opset_version=args.opset,
-            do_simplify=args.simplify,
-            export_format=args.format,
-        )
-
+    # elif args.model_type == "rtdetr":
+    #     model_exporter = RTDETRONNXExporter()
+    #     exported_path = model_exporter.export(
+    #         model=model_pt,
+    #         output_path=args.output_path,
+    #         input_shape=input_shape,
+    #         opset_version=args.opset,
+    #         do_simplify=args.simplify,
+    #         export_format=args.format,
+    #     )
+    #
     if exported_path:
         print(f"Model successfully exported to: {exported_path}")
 
