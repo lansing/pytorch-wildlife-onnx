@@ -24,9 +24,9 @@ class YOLOExporter(ABC):
             do_simplify: bool = True,
             export_format: Literal["float32", "float16", "int8"] = "float32",
             num_classes: int = 3,
-            allow_uint8: bool = False,
-            allow_nhwc: bool = False,
-            allow_denormalized: bool = False,
+            uint8_input: bool = False,
+            nhwc_input: bool = False,
+            denormalized_input: bool = False,
             **kwargs
     ) -> None:
         """
@@ -53,7 +53,7 @@ class YOLOExporter(ABC):
         merged_model = self.do_your_merges(yolo_output_shape, onnx_base_model_path, num_classes, opset_version)
 
         # add preprocessing if needed
-        merged_model = self.add_preprocessing(merged_model, input_shape, opset_version, allow_uint8, allow_nhwc, allow_denormalized)
+        merged_model = self.add_preprocessing(merged_model, input_shape, opset_version, uint8_input, nhwc_input, denormalized_input)
 
         # convert/quantize
         if export_format == "float16":
@@ -116,6 +116,7 @@ class YOLOExporter(ABC):
         return onnx_base_model_path
 
     def do_your_merges(self, yolo_output_shape, onnx_base_model_path, num_classes, opset_version):
-        pass
+        # "null" merge... just load the base model
+        return onnx.load(onnx_base_model_path)
 
 

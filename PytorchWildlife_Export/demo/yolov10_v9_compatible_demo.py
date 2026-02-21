@@ -113,9 +113,9 @@ def run_demo():
         "--simplify",
         "--input_img_size",
         "640",
-        "--allow_nhwc",
-        "--allow_denormalized",
-        "--allow_uint8",
+        "--nhwc_input",
+        "--denormalized_input",
+        "--uint8_input",
     ]
     sys.argv = export_tool_args  # Set sys.argv for argparse
     export_tool_main()  # Run the export tool
