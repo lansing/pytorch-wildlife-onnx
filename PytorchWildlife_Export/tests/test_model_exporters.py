@@ -11,7 +11,6 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from model_loaders.yolov9_loader import YoloV9Loader
-from model_loaders.rtdetr_loader import RTDETRLoader
 from model_exporters.yolov9_onnx_exporter import YoloV9ONNXExporter
 from model_validators.onnx_validator import ONNXModelValidator
 

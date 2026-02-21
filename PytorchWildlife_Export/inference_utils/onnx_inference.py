@@ -22,7 +22,6 @@ except ImportError:
     clip_boxes = None
     print("Ultralytics not found. YOLO-specific features might be limited.")
 
-from PytorchWildlife_Export.postprocessors.base_postprocessor import BasePostProcessor
 
 
 class ONNXInferenceSession:
@@ -178,7 +177,7 @@ class ONNXInferenceSession:
     def run_inference(
         self,
         image_path: str,
-        post_processor: BasePostProcessor,
+        post_processor: Any, #post processor
         confidence_threshold: float,
         iou_threshold: float,
         class_names: Dict[int, str],

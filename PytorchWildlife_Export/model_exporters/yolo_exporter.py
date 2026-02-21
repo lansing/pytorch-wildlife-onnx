@@ -47,7 +47,6 @@ class YOLOExporter(ABC):
         onnx_base_model_path = self.export_base(model, output_path, input_shape, opset_version, do_simplify)
 
         yolo_output_shape = model.model(torch.zeros(input_shape))[0].shape
-        print(f"yolo_output_shape: {yolo_output_shape}")
 
         # do model-specific merges (i.e. output converter)
         merged_model = self.do_your_merges(yolo_output_shape, onnx_base_model_path, num_classes, opset_version)
