@@ -61,10 +61,14 @@ class YOLOv10ToYOLOv9OutputConverter(nn.Module):
         )
 
         # Populate class score for the detected class with its confidence
+        # Clamp to ensure indices are ALWAYS valid [0, num_classes - 1]
+        # TODO clampo if we have precision issues
+        class_id_long = class_id.detach().long()
+        class_id_long = torch.clamp(class_id_long, 0, self.num_classes - 1)
         # Use scatter_ to place confidence at the class_id index
         # class_id needs to be long for scatter_
         # scatter_ expects source and index to have compatible shapes
-        class_scores.scatter_(dim=-1, index=class_id.long(), src=confidence)
+        class_scores.scatter_(dim=-1, index=class_id_long, src=confidence)
 
         # Concatenate boxes (xywh) and class scores
         # Resulting shape: (B, N, 4 + num_classes) -> (B, N, 7)

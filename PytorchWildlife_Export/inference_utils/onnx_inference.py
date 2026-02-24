@@ -23,7 +23,6 @@ except ImportError:
     print("Ultralytics not found. YOLO-specific features might be limited.")
 
 
-
 class ONNXInferenceSession:
     """
     Manages ONNX model loading, inference execution, and post-processing for object detection.
@@ -44,8 +43,12 @@ class ONNXInferenceSession:
 
     def _load_model(self):
         """Loads the ONNX model using onnxruntime."""
+        options = ort.SessionOptions()
+        options.enable_profiling = True
         self.session = ort.InferenceSession(
-            self.onnx_model_path, providers=ort.get_available_providers()
+            self.onnx_model_path,
+            providers=ort.get_available_providers(),
+            sess_options=options,
         )
 
         # Get input/output names and shapes for onnxruntime session
@@ -177,7 +180,7 @@ class ONNXInferenceSession:
     def run_inference(
         self,
         image_path: str,
-        post_processor: Any, #post processor
+        post_processor: Any,  # post processor
         confidence_threshold: float,
         iou_threshold: float,
         class_names: Dict[int, str],

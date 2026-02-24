@@ -107,15 +107,17 @@ def run_demo():
         "--output_path",
         YOLOV10_COMPATIBLE_ONNX_PATH,
         "--format",
-        "float16",
+        # "int8",
+        "float32",
+        # "float16",
         "--opset",
         "18",
         "--simplify",
         "--input_img_size",
         "640",
-        "--nhwc_input",
-        "--denormalized_input",
-        "--uint8_input",
+        # "--nhwc_input",
+        # "--denormalized_input",
+        # "--uint8_input",
     ]
     sys.argv = export_tool_args  # Set sys.argv for argparse
     export_tool_main()  # Run the export tool
@@ -123,7 +125,7 @@ def run_demo():
     print("\n--- Step 2: Run Inference on the YOLOv10 (v9 Compatible) Model ---")
     inference_session = ONNXInferenceSession(
         onnx_model_path=YOLOV10_COMPATIBLE_ONNX_PATH,
-        normalize=False,  # TODO for now, we are testing non-normalized float
+        # normalize=False,  # TODO for now, we are testing non-normalized float
     )
     custom_post_processor = YOLOvPostProcessor()  # Use YOLOv9 post-processor
 

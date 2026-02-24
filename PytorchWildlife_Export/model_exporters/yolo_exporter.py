@@ -1,11 +1,15 @@
 import os
 from abc import ABC, abstractmethod
-import torch.nn as nn
 from typing import Literal
 
 import onnx
 import torch
+import torch.nn as nn
+from onnx.onnx_pb import OperatorSetIdProto
 
+from PytorchWildlife_Export.model_exporters.calibration_data_reader import (
+    WildlifeCalibrationDataReader,
+)
 
 from .input_preprocessing_wrapper import InputPreprocessingWrapper
 from .util import merge_onnx_models
@@ -15,19 +19,20 @@ class YOLOExporter(ABC):
     """
     An abstract base class for ONNX model exporters.
     """
+
     def export(
-            self,
-            model: nn.Module,
-            output_path: str,
-            input_shape: tuple,
-            opset_version: int = 18,
-            do_simplify: bool = True,
-            export_format: Literal["float32", "float16", "int8"] = "float32",
-            num_classes: int = 3,
-            uint8_input: bool = False,
-            nhwc_input: bool = False,
-            denormalized_input: bool = False,
-            **kwargs
+        self,
+        model: nn.Module,
+        output_path: str,
+        input_shape: tuple,
+        opset_version: int = 18,
+        do_simplify: bool = True,
+        export_format: Literal["float32", "float16", "int8"] = "float32",
+        num_classes: int = 3,
+        uint8_input: bool = False,
+        nhwc_input: bool = False,
+        denormalized_input: bool = False,
+        **kwargs,
     ) -> None:
         """
         Exports a PyTorch model to ONNX format.
@@ -44,37 +49,59 @@ class YOLOExporter(ABC):
         """
 
         # export base model
-        onnx_base_model_path = self.export_base(model, output_path, input_shape, opset_version, do_simplify)
+        onnx_base_model_path = self.export_base(
+            model, output_path, input_shape, opset_version, do_simplify
+        )
 
         yolo_output_shape = model.model(torch.zeros(input_shape))[0].shape
 
         # do model-specific merges (i.e. output converter)
-        merged_model = self.do_your_merges(yolo_output_shape, onnx_base_model_path, num_classes, opset_version)
+        merged_model = self.do_your_merges(
+            yolo_output_shape, onnx_base_model_path, num_classes, opset_version
+        )
 
         # add preprocessing if needed
-        merged_model = self.add_preprocessing(merged_model, input_shape, opset_version, uint8_input, nhwc_input, denormalized_input)
+        merged_model, final_input_shape = self.add_preprocessing(
+            merged_model,
+            input_shape,
+            opset_version,
+            uint8_input,
+            nhwc_input,
+            denormalized_input,
+        )
 
         # convert/quantize
         if export_format == "float16":
             from onnxruntime.transformers import float16
 
             converted_model = float16.convert_float_to_float16(
-                merged_model, keep_io_types=True
+                merged_model,
+                keep_io_types=True,
+                node_block_list=["GatherElements", "TopK", "ArgMax", "Sigmoid"],
             )
+            onnx.save_model(converted_model, output_path)
+
+        elif export_format == "int8":
+            raise Exception("int8 support broken rn")
+
         else:
-            converted_model = merged_model
+            onnx.save_model(merged_model, output_path)
 
-        onnx.save_model(converted_model, output_path)
-        return output_path
-
-
-    def add_preprocessing(self, model, input_shape, opset_version, allow_uint8, allow_nhwc, allow_denormalized):
+    def add_preprocessing(
+        self,
+        model,
+        input_shape,
+        opset_version,
+        allow_uint8,
+        allow_nhwc,
+        allow_denormalized,
+    ):
         onnx_preprocessor_tmp_path = "/tmp/preprocessor.onnx"
 
         preprocessor = InputPreprocessingWrapper(
             allow_uint8=allow_uint8,
             allow_nhwc=allow_nhwc,
-            allow_denormalized=allow_denormalized
+            allow_denormalized=allow_denormalized,
         )
         pre_processor_input = preprocessor.make_dummy_input(input_shape)
         torch.onnx.export(
@@ -90,11 +117,17 @@ class YOLOExporter(ABC):
             prefix1="Preprocessor",
             prefix2="YOLO",
         )
-        return merged_model
+        return merged_model, pre_processor_input.shape
 
-
-
-    def export_base(self, model: nn.Module, output_path, input_shape, opset_version, do_simplify: bool, **kwargs):
+    def export_base(
+        self,
+        model: nn.Module,
+        output_path,
+        input_shape,
+        opset_version,
+        do_simplify: bool,
+        **kwargs,
+    ):
         export_kwargs = {
             "format": "onnx",
             "imgsz": input_shape[2],
@@ -114,8 +147,8 @@ class YOLOExporter(ABC):
         onnx_base_model_path = model.export(**export_kwargs)
         return onnx_base_model_path
 
-    def do_your_merges(self, yolo_output_shape, onnx_base_model_path, num_classes, opset_version):
+    def do_your_merges(
+        self, yolo_output_shape, onnx_base_model_path, num_classes, opset_version
+    ):
         # "null" merge... just load the base model
         return onnx.load(onnx_base_model_path)
-
-
