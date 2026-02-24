@@ -6,6 +6,7 @@ import onnx
 import torch
 import torch.nn as nn
 from onnx.onnx_pb import OperatorSetIdProto
+from ultralytics.nn.modules.head import v10Detect
 
 from PytorchWildlife_Export.model_exporters.calibration_data_reader import (
     WildlifeCalibrationDataReader,
@@ -21,6 +22,57 @@ class YOLOExporter(ABC):
     """
 
     def export(
+        self,
+        model: nn.Module,
+        output_path: str,
+        input_shape: tuple,
+        opset_version: int = 18,
+        do_simplify: bool = True,
+        export_format: Literal["float32", "float16", "int8"] = "float32",
+        num_classes: int = 3,
+        uint8_input: bool = False,
+        nhwc_input: bool = False,
+        denormalized_input: bool = False,
+        runtime: str = "onnx",
+        **kwargs,
+    ) -> None:
+        if runtime == "onnx":
+            export_fn = self.export_onnx
+        elif runtime == "tensorrt":
+            export_fn = self.export_tensorrt
+        else:
+            raise Exception(f"Unsupported runtime: {runtime}")
+
+        export_fn(
+            model,
+            output_path,
+            input_shape,
+            opset_version,
+            do_simplify,
+            export_format,
+            num_classes,
+            uint8_input,
+            nhwc_input,
+            denormalized_input,
+        )
+
+    def export_tensorrt(
+        self,
+        model: nn.Module,
+        output_path: str,
+        input_shape: tuple,
+        opset_version: int = 18,
+        do_simplify: bool = True,
+        export_format: Literal["float32", "float16", "int8"] = "float32",
+        num_classes: int = 3,
+        uint8_input: bool = False,
+        nhwc_input: bool = False,
+        denormalized_input: bool = False,
+        **kwargs,
+    ) -> None:
+        pass
+
+    def export_onnx(
         self,
         model: nn.Module,
         output_path: str,
@@ -49,7 +101,7 @@ class YOLOExporter(ABC):
         """
 
         # export base model
-        onnx_base_model_path = self.export_base(
+        onnx_base_model_path = self.export_base_onnx(
             model, output_path, input_shape, opset_version, do_simplify
         )
 
@@ -119,7 +171,35 @@ class YOLOExporter(ABC):
         )
         return merged_model, pre_processor_input.shape
 
-    def export_base(
+    def export_base_tensorrt(
+        self,
+        model: nn.Module,
+        output_path,
+        input_shape,
+        opset_version,
+        do_simplify: bool,
+        **kwargs,
+    ):
+        export_kwargs = {
+            "format": "engine",
+            "imgsz": input_shape[2],
+            "batch": input_shape[0],
+            "simplify": do_simplify,
+            "opset": opset_version,
+            "workspace": 4,
+            "half": False,  # do the 16 bit conversion later after we merge
+            # "half": True if export_format == "float16" else False,
+            "int8": False,  # Force False here, as we will do static quantization separately if requested
+            "name": os.path.basename(output_path),
+            "exist_ok": True,
+            "nms": False,  # Force NMS to False for the raw output export
+            **kwargs,
+        }
+
+        onnx_base_model_path = model.export(**export_kwargs)
+        return onnx_base_model_path
+
+    def export_base_onnx(
         self,
         model: nn.Module,
         output_path,

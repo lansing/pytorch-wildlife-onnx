@@ -17,7 +17,6 @@ from PytorchWildlife_Export.model_exporters.yolov10_v9_compatible_exporter impor
 from PytorchWildlife_Export.model_loaders.yolov9_loader import YoloV9Loader
 
 
-
 def main():
     parser = argparse.ArgumentParser(
         description="Export PyTorch Wildlife models to ONNX format."
@@ -89,6 +88,12 @@ def main():
         action="store_true",
         help="Change the model input dtype to uint8 and add a cast to float32 at the start.",
     )
+    parser.add_argument(
+        "--runtime",
+        type=str,
+        default="onnx",
+        help="Runtime target. Default is 'onnx'",
+    )
 
     args = parser.parse_args()
 
@@ -136,7 +141,8 @@ def main():
             else 3,
             uint8_input=args.uint8_input,
             nhwc_input=args.nhwc_input,
-            denormalized_input=args.denormalized_input
+            denormalized_input=args.denormalized_input,
+            runtime=args.runtime,
         )
     elif args.model_type == "yolov10_v9_compatible":
         model_exporter = YOLOv10V9CompatibleONNXExporter()
@@ -152,7 +158,8 @@ def main():
             else 3,
             uint8_input=args.uint8_input,
             nhwc_input=args.nhwc_input,
-            denormalized_input=args.denormalized_input
+            denormalized_input=args.denormalized_input,
+            runtime=args.runtime,
         )
 
     print(f"Model successfully exported to: {exported_path}")
@@ -169,6 +176,7 @@ def main():
         print(f"Class names file created: {class_names_file_path}")
     except Exception as e:
         print(f"Error creating class names file: {e}")
+
 
 if __name__ == "__main__":
     main()

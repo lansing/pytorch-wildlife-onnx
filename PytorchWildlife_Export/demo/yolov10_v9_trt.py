@@ -112,6 +112,8 @@ def run_demo():
         # "float16",
         "--opset",
         "18",
+        "--runtime",
+        "tensorrt",
         "--simplify",
         "--input_img_size",
         "320",
@@ -121,6 +123,9 @@ def run_demo():
     ]
     sys.argv = export_tool_args  # Set sys.argv for argparse
     export_tool_main()  # Run the export tool
+
+    # TODO temp disable inf (need to do it in trt)
+    return
 
     print("\n--- Step 2: Run Inference on the YOLOv10 (v9 Compatible) Model ---")
     inference_session = ONNXInferenceSession(
