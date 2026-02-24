@@ -187,11 +187,11 @@ class YOLOExporter(ABC):
             "format": "engine",
             "imgsz": input_shape[2],
             "batch": input_shape[0],
-            "simplify": do_simplify,
-            "workspace": 4,
-            "half": False,  # do the 16 bit conversion later after we merge
+            # "simplify": do_simplify,
+            # "workspace": 4,
+            # "half": False,  # do the 16 bit conversion later after we merge
             # "half": True if export_format == "float16" else False,
-            "int8": False,  # Force False here, as we will do static quantization separately if requested
+            # "int8": False,  # Force False here, as we will do static quantization separately if requested
             "name": os.path.basename(output_path),
             "exist_ok": True,
             "nms": False,  # Force NMS to False for the raw output export
@@ -199,7 +199,24 @@ class YOLOExporter(ABC):
         }
 
         trt_base_model_path = model.export(**export_kwargs)
-        return trt_base_model_path
+
+        with open(trt_base_model_path, "rb") as f:
+            data = f.read()
+
+        # Find the start of the TensorRT magic tag
+        # It usually starts with 'ptr' (binary for the TRT magic)
+        marker = b"ptr"
+        offset = data.find(marker)
+
+        if offset != -1:
+            trt_path = f"/tmp/{os.path.basename(output_path)}.engine"
+            print(f"Found TRT engine at offset: {offset}")
+            with open(trt_path, "wb") as f_out:
+                f_out.write(data[offset:])
+            print("Extracted raw_engine.engine successfully!")
+            return trt_path
+        else:
+            print("Could not find the TRT magic tag.")
 
     def export_base_onnx(
         self,
