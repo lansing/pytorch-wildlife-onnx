@@ -36,7 +36,7 @@ GLOBAL_CLASS_NAMES = {0: "animal", 1: "person", 2: "vehicle"}
 # Model parameters for YOLOv10 compatible export
 YOLOV10_COMPATIBLE_VERSION = "MDV6-yolov10-c"
 YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
-    OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_demo_export.onnx"
+    OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_demo_export.engine"
 )
 # YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
 #     "exported_models/MDV6-yolov10-c_float16_320_v9_compat_denorm_nhwc.onnx"
