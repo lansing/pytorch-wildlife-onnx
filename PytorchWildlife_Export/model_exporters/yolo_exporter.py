@@ -1,4 +1,5 @@
 import os
+import shutil
 from abc import ABC, abstractmethod
 from typing import Literal
 
@@ -70,7 +71,10 @@ class YOLOExporter(ABC):
         denormalized_input: bool = False,
         **kwargs,
     ) -> None:
-        pass
+        trt_base_model_path = self.export_base_tensorrt(
+            model, output_path, input_shape, do_simplify
+        )
+        shutil.copy(trt_base_model_path, output_path)
 
     def export_onnx(
         self,
@@ -176,7 +180,6 @@ class YOLOExporter(ABC):
         model: nn.Module,
         output_path,
         input_shape,
-        opset_version,
         do_simplify: bool,
         **kwargs,
     ):
@@ -185,7 +188,6 @@ class YOLOExporter(ABC):
             "imgsz": input_shape[2],
             "batch": input_shape[0],
             "simplify": do_simplify,
-            "opset": opset_version,
             "workspace": 4,
             "half": False,  # do the 16 bit conversion later after we merge
             # "half": True if export_format == "float16" else False,
@@ -196,8 +198,8 @@ class YOLOExporter(ABC):
             **kwargs,
         }
 
-        onnx_base_model_path = model.export(**export_kwargs)
-        return onnx_base_model_path
+        trt_base_model_path = model.export(**export_kwargs)
+        return trt_base_model_path
 
     def export_base_onnx(
         self,
