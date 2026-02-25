@@ -220,6 +220,7 @@ class SummaryScreen(Screen):
         return f"""
 - **Model Type**: `{selections["model_type"]}`
 - **Model Version**: `{selections["model_version"]}`
+- **Runtime**: `{selections["runtime"]}`
 - **Output Directory**: `{selections["output_dir"]}`
 - **Output Path**: `{output_path}`
 - **Format**: `{selections["format"]}`
@@ -243,7 +244,8 @@ class SummaryScreen(Screen):
             filename_base += "_nhwc"
         if selections.get("uint8_input"):
             filename_base += "_uint8input"
-        filename = f"{filename_base}.onnx"
+        ext = ".engine" if selections.get("runtime") == "tensorrt" else ".onnx"
+        filename = f"{filename_base}{ext}"
         return os.path.join(selections["output_dir"], filename)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -324,6 +326,8 @@ class ExecutionScreen(Screen):
             str(selections["input_img_size"]),
             "--opset",
             str(selections["opset"]),
+            "--runtime",
+            selections["runtime"],
         ]
         if selections["simplify"]:
             cmd.append("--simplify")
@@ -364,7 +368,10 @@ class ExportTUI(App):
         return ChoiceSelectionScreen("model_type", self.get_model_version_screen)
 
     def get_model_version_screen(self):
-        return ChoiceSelectionScreen("model_version", self.get_output_dir_screen)
+        return ChoiceSelectionScreen("model_version", self.get_runtime_screen)
+
+    def get_runtime_screen(self):
+        return ChoiceSelectionScreen("runtime", self.get_output_dir_screen)
 
     def get_output_dir_screen(self):
         return InputScreen("output_dir", self.get_format_screen)

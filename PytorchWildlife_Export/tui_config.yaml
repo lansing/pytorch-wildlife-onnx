@@ -1,6 +1,7 @@
 headings:
   model_type: "Select Model Type"
   model_version: "Select Model Version"
+  runtime: "Select Runtime Target"
   output_dir: "Output Directory"
   format: "Select Export Format (Precision)"
   input_img_size: "Input Image Size"
@@ -14,6 +15,10 @@ headings:
 instructions:
   model_type: "Choose the type of model you want to export."
   model_version: "Choose the specific version of the selected model."
+  runtime: |
+    Choose the inference runtime to target.
+    **ONNX** produces a `.onnx` file compatible with ONNX Runtime.
+    **TensorRT** produces a `.engine` file optimised for NVIDIA GPUs. Requires an NVIDIA GPU and TensorRT to be installed.
   output_dir: "Enter the directory where the exported model will be saved."
   format: |
     Select the precision for the exported model.
@@ -36,6 +41,11 @@ instructions:
   run_export: "Review the selected options below and proceed to run the export."
 
 options:
+  runtime:
+    - value: 'onnx'
+      label: 'ONNX — export to .onnx (default)'
+    - value: 'tensorrt'
+      label: 'TensorRT — export to .engine (requires NVIDIA GPU)'
   model_type:
     - value: 'yolov9'
       label: 'YOLOv9'
@@ -90,6 +100,7 @@ options:
 defaults:
   model_type: 'yolov10_v9_compatible'
   model_version: 'MDV6-yolov10-c'
+  runtime: 'onnx'
   output_dir: 'exported_models'
   format: 'float16'
   input_img_size: 320

@@ -103,7 +103,27 @@ class YOLOExporter(ABC):
         )
         LOGGER.info(f"Intermediate ONNX model at: {onnx_base_model_path}")
 
-        # PLACEHOLDER: model merges (pre/post processing layers) will be applied here
+        yolo_output_shape = model.model(torch.zeros(input_shape))[0].shape
+
+        # do model-specific merges (i.e. output converter)
+        merged_model = self.do_your_merges(
+            yolo_output_shape, onnx_base_model_path, num_classes, opset_version
+        )
+
+        # add preprocessing if needed
+        merged_model, final_input_shape = self.add_preprocessing(
+            merged_model,
+            input_shape,
+            opset_version,
+            uint8_input,
+            nhwc_input,
+            denormalized_input,
+        )
+
+        # save merged model to a temp file for TRT conversion
+        merged_onnx_tmp_path = "/tmp/merged_for_trt.onnx"
+        onnx.save_model(merged_model, merged_onnx_tmp_path)
+        LOGGER.info(f"Merged ONNX model saved to: {merged_onnx_tmp_path}")
 
         from ultralytics.utils.export.engine import (
             onnx2engine as ultralytics_onnx2engine,
@@ -112,13 +132,13 @@ class YOLOExporter(ABC):
         engine_file = str(Path(output_path).with_suffix(".engine"))
 
         ultralytics_onnx2engine(
-            onnx_file=str(onnx_base_model_path),
+            onnx_file=merged_onnx_tmp_path,
             engine_file=engine_file,
             workspace=4,
             half=(export_format == "float16"),
             int8=(export_format == "int8"),
             dynamic=False,
-            shape=input_shape,
+            shape=tuple(final_input_shape),
             dla=None,
             dataset=None,
             metadata=None,  # prevents Ultralytics metadata header
