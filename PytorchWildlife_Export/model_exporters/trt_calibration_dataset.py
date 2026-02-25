@@ -17,12 +17,14 @@ class TRTCalibrationDataLoader:
     """
     Iterable that yields {"img": tensor} dicts for TensorRT INT8 calibration.
 
-    Each yielded tensor has shape (1, 3, H, W), dtype uint8, values 0-255 (NCHW).
-    This matches what ultralytics' EngineCalibrator.get_batch() expects: it divides
-    by 255.0 internally to produce float32 [0, 1] input for the TensorRT builder.
+    Each yielded tensor has shape (1, C, H, W) or (1, H, W, C) when nhwc_input
+    is set, dtype uint8, values 0-255.  EngineCalibrator.get_batch() divides by
+    255.0 internally, producing float32 [0, 1] in the correct layout for TRT.
 
     Images are streamed from a HuggingFace dataset on first use and cached locally
     as a torch tensor list so repeated calibration runs skip the download.
+    The cache key encodes all parameters that affect the tensor contents, so
+    different configurations never share a cache file.
     """
 
     def __init__(
@@ -32,18 +34,21 @@ class TRTCalibrationDataLoader:
         hf_dataset: str = DEFAULT_HF_DATASET,
         hf_split: str = "train",
         cache_dir: Path = DEFAULT_CACHE_DIR,
+        nhwc_input: bool = False,
     ):
         self.input_size = input_size
         self.num_images = num_images
         self.hf_dataset = hf_dataset
         self.hf_split = hf_split
         self.cache_dir = Path(cache_dir)
+        self.nhwc_input = nhwc_input
         self.batch_size = 1  # EngineCalibrator reads this attribute
         self._images: list[torch.Tensor] | None = None  # loaded lazily on first iter
 
     def _cache_path(self) -> Path:
         safe_name = self.hf_dataset.replace("/", "_")
-        filename = f"{safe_name}_{self.hf_split}_{self.num_images}_{self.input_size}.pt"
+        layout = "nhwc" if self.nhwc_input else "nchw"
+        filename = f"{safe_name}_{self.hf_split}_{self.num_images}_{self.input_size}_{layout}.pt"
         return self.cache_dir / filename
 
     def _letterbox(self, pil_img) -> torch.Tensor:
@@ -107,5 +112,9 @@ class TRTCalibrationDataLoader:
         if self._images is None:
             self._images = self._load_images()
         for tensor in self._images:
-            # EngineCalibrator expects a batched (N, 3, H, W) tensor
+            # tensor is (3, H, W) uint8 NCHW from _letterbox
+            if self.nhwc_input:
+                # NHWC: EngineCalibrator divides by 255 → float32 NHWC 0-1,
+                # matching the merged model's NHWC input binding.
+                tensor = tensor.permute(1, 2, 0).contiguous()  # CHW → HWC
             yield {"img": tensor.unsqueeze(0)}

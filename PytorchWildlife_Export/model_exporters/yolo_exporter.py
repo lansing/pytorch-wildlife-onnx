@@ -94,11 +94,6 @@ class YOLOExporter(ABC):
                     "denormalized_input — engine input would expect 0-255, but "
                     "calibrator provides 0-1"
                 )
-            if nhwc_input:
-                incompatible.append(
-                    "nhwc_input — engine input would be NHWC, but calibrator "
-                    "provides NCHW"
-                )
             if incompatible:
                 raise ValueError(
                     "The following preprocessing options are incompatible with "
@@ -170,6 +165,7 @@ class YOLOExporter(ABC):
             calibration_dataloader = TRTCalibrationDataLoader(
                 input_size=tuple(final_input_shape)[-1],
                 num_images=num_calibration_images,
+                nhwc_input=nhwc_input,
             )
             LOGGER.info(
                 f"INT8 calibration: will stream {num_calibration_images} images "
