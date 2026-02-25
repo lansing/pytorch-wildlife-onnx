@@ -17,9 +17,16 @@ class TRTCalibrationDataLoader:
     """
     Iterable that yields {"img": tensor} dicts for TensorRT INT8 calibration.
 
-    Each yielded tensor has shape (1, C, H, W) or (1, H, W, C) when nhwc_input
-    is set, dtype uint8, values 0-255.  EngineCalibrator.get_batch() divides by
-    255.0 internally, producing float32 [0, 1] in the correct layout for TRT.
+    When used with the standard ultralytics EngineCalibrator (no preprocessing
+    patch), tensors must be uint8 so that the calibrator's hard-coded /255.0
+    produces float32 [0, 1].  When the _preprocessing_calibration_patch context
+    manager is active, get_batch is replaced and tensors are forwarded as-is, so
+    this loader must match the exact dtype/layout/range of the merged model's
+    input binding:
+
+      - baseline / nhwc_input only: uint8 CHW or HWC (patch divides by 255 → float32 0-1)
+      - denormalized_input: float32 CHW or HWC, range 0-255
+      - uint8_input: uint8 CHW or HWC, range 0-255
 
     Images are streamed from a HuggingFace dataset on first use and cached locally
     as a torch tensor list so repeated calibration runs skip the download.
@@ -35,6 +42,8 @@ class TRTCalibrationDataLoader:
         hf_split: str = "train",
         cache_dir: Path = DEFAULT_CACHE_DIR,
         nhwc_input: bool = False,
+        uint8_input: bool = False,
+        denormalized_input: bool = False,
     ):
         self.input_size = input_size
         self.num_images = num_images
@@ -42,13 +51,24 @@ class TRTCalibrationDataLoader:
         self.hf_split = hf_split
         self.cache_dir = Path(cache_dir)
         self.nhwc_input = nhwc_input
+        self.uint8_input = uint8_input
+        self.denormalized_input = denormalized_input
         self.batch_size = 1  # EngineCalibrator reads this attribute
         self._images: list[torch.Tensor] | None = None  # loaded lazily on first iter
 
     def _cache_path(self) -> Path:
         safe_name = self.hf_dataset.replace("/", "_")
         layout = "nhwc" if self.nhwc_input else "nchw"
-        filename = f"{safe_name}_{self.hf_split}_{self.num_images}_{self.input_size}_{layout}.pt"
+        if self.uint8_input:
+            dtype = "uint8"
+        elif self.denormalized_input:
+            dtype = "float32_255"
+        else:
+            dtype = "uint8"  # baseline: uint8 for compensating-data trick
+        filename = (
+            f"{safe_name}_{self.hf_split}_{self.num_images}"
+            f"_{self.input_size}_{layout}_{dtype}.pt"
+        )
         return self.cache_dir / filename
 
     def _letterbox(self, pil_img) -> torch.Tensor:
@@ -113,8 +133,16 @@ class TRTCalibrationDataLoader:
             self._images = self._load_images()
         for tensor in self._images:
             # tensor is (3, H, W) uint8 NCHW from _letterbox
+            # 1. Layout
             if self.nhwc_input:
-                # NHWC: EngineCalibrator divides by 255 → float32 NHWC 0-1,
-                # matching the merged model's NHWC input binding.
                 tensor = tensor.permute(1, 2, 0).contiguous()  # CHW → HWC
-            yield {"img": tensor.unsqueeze(0)}
+
+            # 2. Dtype / range
+            # uint8_input: keep uint8 0-255 (patched get_batch delivers as-is)
+            # denormalized_input: float32 0-255 (patched get_batch delivers as-is)
+            # baseline / nhwc_input only: keep uint8 — compensating-data trick:
+            #   EngineCalibrator /255 → float32 0-1 (no patch active)
+            if self.denormalized_input and not self.uint8_input:
+                tensor = tensor.float()  # uint8 → float32, range still 0-255
+
+            yield {"img": tensor.unsqueeze(0).contiguous()}

@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -19,6 +20,99 @@ from PytorchWildlife_Export.model_exporters.calibration_data_reader import (
 
 from .input_preprocessing_wrapper import InputPreprocessingWrapper
 from .util import merge_onnx_models
+
+
+@contextmanager
+def _preprocessing_calibration_patch():
+    """
+    Context manager that monkey-patches ``tensorrt.Builder`` so that when
+    ``onnx2engine`` creates its local ``EngineCalibrator`` and assigns it to
+    ``config.int8_calibrator``, we intercept that assignment and replace the
+    ``get_batch`` method on the calibrator instance.
+
+    The patched ``get_batch`` forwards the tensor from our dataloader directly
+    to TRT without the hard-coded ``/ 255.0`` division that ultralytics' local
+    ``EngineCalibrator`` applies.  This allows calibration data to be delivered
+    in whatever dtype/layout/range the merged ONNX model's input expects
+    (uint8, float32 0-255, NHWC, etc.).
+
+    Approach B from PREPROCESS_PLAN.md.
+    """
+    import tensorrt as trt
+    import types
+
+    _orig_builder_cls = trt.Builder
+
+    class _ConfigProxy:
+        """Wraps IBuilderConfig and intercepts ``int8_calibrator =``."""
+
+        def __init__(self, real_cfg):
+            object.__setattr__(self, "_real", real_cfg)
+
+        def __setattr__(self, name, value):
+            real = object.__getattribute__(self, "_real")
+            if name == "int8_calibrator":
+                # Patch get_batch on the calibrator instance so that it
+                # forwards data as-is (no /255 division).
+                def _patched_get_batch(self_cal, names):
+                    try:
+                        img = next(self_cal.data_iter)["img"]
+                        img = img.contiguous()
+                        if img.device.type == "cpu":
+                            img = img.cuda()
+                        return [int(img.data_ptr())]
+                    except StopIteration:
+                        return None
+
+                value.get_batch = types.MethodType(_patched_get_batch, value)
+                real.int8_calibrator = value
+            else:
+                setattr(real, name, value)
+
+        def __getattr__(self, name):
+            return getattr(object.__getattribute__(self, "_real"), name)
+
+    class _PatchedBuilder:
+        """Wraps trt.Builder and returns _ConfigProxy from create_builder_config."""
+
+        def __init__(self, logger):
+            object.__setattr__(self, "_real", _orig_builder_cls(logger))
+
+        def _unwrap(self, config):
+            """Return the real IBuilderConfig, unwrapping _ConfigProxy if needed."""
+            if isinstance(config, _ConfigProxy):
+                return object.__getattribute__(config, "_real")
+            return config
+
+        def create_builder_config(self):
+            real_cfg = object.__getattribute__(self, "_real").create_builder_config()
+            return _ConfigProxy(real_cfg)
+
+        def build_serialized_network(self, network, config):
+            # Unwrap before the C-level type check in pybind11.
+            return object.__getattribute__(self, "_real").build_serialized_network(
+                network, self._unwrap(config)
+            )
+
+        def build_engine(self, network, config):
+            # Older TRT API path.
+            return object.__getattribute__(self, "_real").build_engine(
+                network, self._unwrap(config)
+            )
+
+        def __getattr__(self, name):
+            return getattr(object.__getattribute__(self, "_real"), name)
+
+        def __setattr__(self, name, value):
+            setattr(object.__getattribute__(self, "_real"), name, value)
+
+    trt.Builder = _PatchedBuilder
+    LOGGER.debug("trt.Builder patched for preprocessing-aware INT8 calibration.")
+    try:
+        yield
+    finally:
+        trt.Builder = _orig_builder_cls
+        LOGGER.debug("trt.Builder restored.")
 
 
 class YOLOExporter(ABC):
@@ -78,29 +172,6 @@ class YOLOExporter(ABC):
         num_calibration_images: int = 300,
         **kwargs,
     ) -> None:
-        # Guard: input-preprocessing options that alter the model's expected input
-        # dtype or layout break INT8 calibration. EngineCalibrator.get_batch()
-        # always provides float32 NCHW 0-1 tensors to TensorRT, so the merged
-        # model must also expect float32 NCHW 0-1 at its input.
-        if export_format == "int8":
-            incompatible = []
-            if uint8_input:
-                incompatible.append(
-                    "uint8_input — engine input would be uint8, but calibrator "
-                    "provides float32"
-                )
-            if denormalized_input:
-                incompatible.append(
-                    "denormalized_input — engine input would expect 0-255, but "
-                    "calibrator provides 0-1"
-                )
-            if incompatible:
-                raise ValueError(
-                    "The following preprocessing options are incompatible with "
-                    "INT8 TensorRT calibration:\n"
-                    + "\n".join(f"  • {m}" for m in incompatible)
-                )
-
         # Initialize PyTorch CUDA context BEFORE importing TensorRT.
         # This ordering is critical — importing tensorrt before select_device can
         # cause a cudaErrorNoDevice / CUDA initialization failure.
@@ -166,26 +237,39 @@ class YOLOExporter(ABC):
                 input_size=tuple(final_input_shape)[-1],
                 num_images=num_calibration_images,
                 nhwc_input=nhwc_input,
+                uint8_input=uint8_input,
+                denormalized_input=denormalized_input,
             )
             LOGGER.info(
                 f"INT8 calibration: will stream {num_calibration_images} images "
                 f"from '{TRTCalibrationDataLoader.__module__}'."
             )
 
-        ultralytics_onnx2engine(
-            onnx_file=merged_onnx_tmp_path,
-            engine_file=engine_file,
-            workspace=4,
-            half=(export_format == "float16"),
-            int8=(export_format == "int8"),
-            dynamic=False,
-            shape=tuple(final_input_shape),
-            dla=None,
-            dataset=calibration_dataloader,
-            metadata=None,  # prevents Ultralytics metadata header
-            verbose=False,
-            prefix="TRT Export: ",
-        )
+        # The compensating-data trick handles nhwc_input alone: the loader
+        # yields uint8 NHWC tensors and EngineCalibrator's /255 produces float32
+        # NHWC 0-1, which is exactly what the merged model expects.
+        #
+        # For uint8_input and denormalized_input the /255 produces the wrong
+        # dtype or range, so we must patch trt.Builder so the local
+        # EngineCalibrator inside onnx2engine delivers data as-is.
+        needs_patch = export_format == "int8" and (uint8_input or denormalized_input)
+        patch_ctx = _preprocessing_calibration_patch() if needs_patch else contextmanager(lambda: (yield))()
+
+        with patch_ctx:
+            ultralytics_onnx2engine(
+                onnx_file=merged_onnx_tmp_path,
+                engine_file=engine_file,
+                workspace=4,
+                half=(export_format == "float16"),
+                int8=(export_format == "int8"),
+                dynamic=False,
+                shape=tuple(final_input_shape),
+                dla=None,
+                dataset=calibration_dataloader,
+                metadata=None,  # prevents Ultralytics metadata header
+                verbose=False,
+                prefix="TRT Export: ",
+            )
         LOGGER.info(f"TensorRT engine saved to: {engine_file}")
         if engine_file != output_path:
             shutil.copy(engine_file, output_path)
