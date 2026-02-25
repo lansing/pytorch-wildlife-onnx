@@ -92,7 +92,18 @@ def main():
         "--runtime",
         type=str,
         default="onnx",
-        help="Runtime target. Default is 'onnx'",
+        choices=["onnx", "tensorrt"],
+        help="Runtime target. Default is 'onnx'.",
+    )
+    parser.add_argument(
+        "--num_calibration_images",
+        type=int,
+        default=300,
+        help=(
+            "Number of images to stream from the calibration dataset for INT8 "
+            "TensorRT quantization. Only used when --runtime tensorrt and "
+            "--format int8. Default is 300."
+        ),
     )
 
     args = parser.parse_args()
@@ -127,40 +138,30 @@ def main():
     exported_path = args.output_path
     os.makedirs(os.path.dirname(exported_path), exist_ok=True)
 
+    num_classes = (
+        len(model_pt.model.names) if hasattr(model_pt.model, "names") else 3
+    )
+    export_kwargs = dict(
+        model=model_pt,
+        output_path=args.output_path,
+        input_shape=input_shape,
+        opset_version=args.opset,
+        do_simplify=args.simplify,
+        export_format=args.format,
+        num_classes=num_classes,
+        uint8_input=args.uint8_input,
+        nhwc_input=args.nhwc_input,
+        denormalized_input=args.denormalized_input,
+        runtime=args.runtime,
+        num_calibration_images=args.num_calibration_images,
+    )
+
     if args.model_type in ("yolov9", "yolov10"):
         model_exporter = YoloV9ONNXExporter()
-        model_exporter.export(
-            model=model_pt,
-            output_path=args.output_path,
-            input_shape=input_shape,
-            opset_version=args.opset,
-            do_simplify=args.simplify,
-            export_format=args.format,
-            num_classes=len(model_pt.model.names)
-            if hasattr(model_pt.model, "names")
-            else 3,
-            uint8_input=args.uint8_input,
-            nhwc_input=args.nhwc_input,
-            denormalized_input=args.denormalized_input,
-            runtime=args.runtime,
-        )
+        model_exporter.export(**export_kwargs)
     elif args.model_type == "yolov10_v9_compatible":
         model_exporter = YOLOv10V9CompatibleONNXExporter()
-        model_exporter.export(
-            model=model_pt,
-            output_path=args.output_path,
-            input_shape=input_shape,
-            opset_version=args.opset,
-            do_simplify=args.simplify,
-            export_format=args.format,
-            num_classes=len(model_pt.model.names)
-            if hasattr(model_pt.model, "names")
-            else 3,
-            uint8_input=args.uint8_input,
-            nhwc_input=args.nhwc_input,
-            denormalized_input=args.denormalized_input,
-            runtime=args.runtime,
-        )
+        model_exporter.export(**export_kwargs)
 
     print(f"Model successfully exported to: {exported_path}")
 

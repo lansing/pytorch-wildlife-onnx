@@ -131,7 +131,7 @@ class InputScreen(BaseSelectionScreen):
     def __init__(self, key: str, next_screen_callable, **kwargs):
         super().__init__(key, **kwargs)
         self.next_screen_callable = next_screen_callable
-        self.input_type = "number" if key in ["input_img_size", "opset"] else "text"
+        self.input_type = "number" if key in ["input_img_size", "opset", "num_calibration_images"] else "text"
         self.min_val = (
             CONFIG["ranges"][key].get("min") if self.input_type == "number" else None
         )
@@ -217,6 +217,16 @@ class SummaryScreen(Screen):
             preproc_parts.append("uint8 dtype")
         preproc_str = ", ".join(preproc_parts) if preproc_parts else "none"
 
+        is_int8_trt = (
+            selections.get("runtime") == "tensorrt"
+            and selections.get("format") == "int8"
+        )
+        calib_line = (
+            f"\n- **Calibration Images**: `{selections['num_calibration_images']}`"
+            if is_int8_trt
+            else ""
+        )
+
         return f"""
 - **Model Type**: `{selections["model_type"]}`
 - **Model Version**: `{selections["model_version"]}`
@@ -227,7 +237,7 @@ class SummaryScreen(Screen):
 - **Input Image Size**: `{selections["input_img_size"]}`
 - **Opset Version**: `{selections["opset"]}`
 - **Simplify Model**: `{selections["simplify"]}`
-- **Input Preprocessing**: `{preproc_str}`
+- **Input Preprocessing**: `{preproc_str}`{calib_line}
 """
 
     def get_output_path(self) -> str:
@@ -337,6 +347,14 @@ class ExecutionScreen(Screen):
             cmd.append("--nhwc_input")
         if selections.get("uint8_input"):
             cmd.append("--uint8_input")
+        if (
+            selections.get("runtime") == "tensorrt"
+            and selections.get("format") == "int8"
+        ):
+            cmd += [
+                "--num_calibration_images",
+                str(selections.get("num_calibration_images", 300)),
+            ]
         return cmd
 
 
@@ -377,7 +395,15 @@ class ExportTUI(App):
         return InputScreen("output_dir", self.get_format_screen)
 
     def get_format_screen(self):
-        return ChoiceSelectionScreen("format", self.get_input_img_size_screen)
+        return ChoiceSelectionScreen("format", self.get_post_format_screen)
+
+    def get_post_format_screen(self):
+        if (
+            self.selections.get("runtime") == "tensorrt"
+            and self.selections.get("format") == "int8"
+        ):
+            return InputScreen("num_calibration_images", self.get_input_img_size_screen)
+        return self.get_input_img_size_screen()
 
     def get_input_img_size_screen(self):
         return InputScreen("input_img_size", self.get_opset_screen)

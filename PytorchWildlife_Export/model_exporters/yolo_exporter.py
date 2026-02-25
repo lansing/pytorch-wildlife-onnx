@@ -39,6 +39,7 @@ class YOLOExporter(ABC):
         nhwc_input: bool = False,
         denormalized_input: bool = False,
         runtime: str = "onnx",
+        num_calibration_images: int = 300,
         **kwargs,
     ) -> None:
         if runtime == "onnx":
@@ -59,6 +60,7 @@ class YOLOExporter(ABC):
             uint8_input,
             nhwc_input,
             denormalized_input,
+            num_calibration_images=num_calibration_images,
         )
 
     def export_tensorrt(
@@ -73,8 +75,37 @@ class YOLOExporter(ABC):
         uint8_input: bool = False,
         nhwc_input: bool = False,
         denormalized_input: bool = False,
+        num_calibration_images: int = 300,
         **kwargs,
     ) -> None:
+        # Guard: input-preprocessing options that alter the model's expected input
+        # dtype or layout break INT8 calibration. EngineCalibrator.get_batch()
+        # always provides float32 NCHW 0-1 tensors to TensorRT, so the merged
+        # model must also expect float32 NCHW 0-1 at its input.
+        if export_format == "int8":
+            incompatible = []
+            if uint8_input:
+                incompatible.append(
+                    "uint8_input — engine input would be uint8, but calibrator "
+                    "provides float32"
+                )
+            if denormalized_input:
+                incompatible.append(
+                    "denormalized_input — engine input would expect 0-255, but "
+                    "calibrator provides 0-1"
+                )
+            if nhwc_input:
+                incompatible.append(
+                    "nhwc_input — engine input would be NHWC, but calibrator "
+                    "provides NCHW"
+                )
+            if incompatible:
+                raise ValueError(
+                    "The following preprocessing options are incompatible with "
+                    "INT8 TensorRT calibration:\n"
+                    + "\n".join(f"  • {m}" for m in incompatible)
+                )
+
         # Initialize PyTorch CUDA context BEFORE importing TensorRT.
         # This ordering is critical — importing tensorrt before select_device can
         # cause a cudaErrorNoDevice / CUDA initialization failure.
@@ -128,8 +159,22 @@ class YOLOExporter(ABC):
         from ultralytics.utils.export.engine import (
             onnx2engine as ultralytics_onnx2engine,
         )
+        from PytorchWildlife_Export.model_exporters.trt_calibration_dataset import (
+            TRTCalibrationDataLoader,
+        )
 
         engine_file = str(Path(output_path).with_suffix(".engine"))
+
+        calibration_dataloader = None
+        if export_format == "int8":
+            calibration_dataloader = TRTCalibrationDataLoader(
+                input_size=tuple(final_input_shape)[-1],
+                num_images=num_calibration_images,
+            )
+            LOGGER.info(
+                f"INT8 calibration: will stream {num_calibration_images} images "
+                f"from '{TRTCalibrationDataLoader.__module__}'."
+            )
 
         ultralytics_onnx2engine(
             onnx_file=merged_onnx_tmp_path,
@@ -140,7 +185,7 @@ class YOLOExporter(ABC):
             dynamic=False,
             shape=tuple(final_input_shape),
             dla=None,
-            dataset=None,
+            dataset=calibration_dataloader,
             metadata=None,  # prevents Ultralytics metadata header
             verbose=False,
             prefix="TRT Export: ",
@@ -211,7 +256,12 @@ class YOLOExporter(ABC):
             onnx.save_model(converted_model, output_path)
 
         elif export_format == "int8":
-            raise Exception("int8 support broken rn")
+            # PLACEHOLDER: ONNX INT8 static quantization (e.g. via onnxruntime quantization API).
+            # Ultralytics does not support native INT8 at the ONNX export stage.
+            raise NotImplementedError(
+                "INT8 ONNX export is not yet implemented. "
+                "Use --runtime tensorrt for INT8 quantization."
+            )
 
         else:
             onnx.save_model(merged_model, output_path)
