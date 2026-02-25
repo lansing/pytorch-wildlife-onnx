@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements first so this layer is cached as long as requirements.txt
 # does not change — even when source code changes.
-COPY PytorchWildlife_Export/requirements.txt ./PytorchWildlife_Export/
+COPY PytorchWildlife_Export/requirements-trt.txt ./PytorchWildlife_Export/
 
-RUN pip install --no-cache-dir -r ./PytorchWildlife_Export/requirements.txt
+RUN pip install --no-cache-dir -r ./PytorchWildlife_Export/requirements-trt.txt
 
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────

@@ -1,0 +1,19 @@
+# Requirements for the TRT export image (linux/amd64, CUDA present).
+# Differs from requirements.txt only in using onnxruntime-gpu instead of
+# onnxruntime — the GPU build is required for GPU-accelerated ONNX operations
+# and is only available as a PyPI wheel on linux/amd64.
+onnxruntime-gpu
+onnxconverter-common
+numpy
+ultralytics
+torch
+torchvision
+pyyaml
+wget
+onnx
+onnxscript
+onnxslim
+datasets
+Pillow
+opencv-python-headless
+textual

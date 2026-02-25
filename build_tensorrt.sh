@@ -31,8 +31,11 @@ for arg in "$@"; do
 done
 
 echo "Building $IMAGE_NAME (CACHE_BUSTER=$CACHE_BUSTER)..."
+# Always target linux/amd64 — the only supported CUDA deployment platform.
+# Building from Mac aarch64 will use QEMU emulation (slower but correct).
 docker build \
     -f Dockerfile.trt \
+    --platform linux/amd64 \
     --build-arg CACHE_BUSTER="$CACHE_BUSTER" \
     $EXTRA_ARGS \
     -t "$IMAGE_NAME" \
