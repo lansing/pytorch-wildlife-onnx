@@ -10,6 +10,7 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "pytorch_wildlife_export" / "calibration"
 DEFAULT_HF_DATASET = "lucabaggi/animal-wildlife"
+# TODO try w https://docs.ultralytics.com/datasets/detect/african-wildlife/#dataset-yaml
 
 
 class TRTCalibrationDataLoader:

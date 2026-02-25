@@ -6,14 +6,17 @@ IMAGE_NAME="pytorch-wildlife-export-tui"
 # Define local directories to be mounted
 LOCAL_CHECKPOINTS_DIR="checkpoints"
 LOCAL_EXPORTED_MODELS_DIR="exported_models"
+LOCAL_CALIB_CACHE_DIR="cache/calibration"
 
 # Define container paths for mounting
 CONTAINER_CHECKPOINTS_DIR="/root/.cache/torch/hub/checkpoints"
 CONTAINER_EXPORTED_MODELS_DIR="/exported_models"
+CONTAINER_CALIB_CACHE_DIR="/root/.cache/pytorch_wildlife_export/calibration"
 
 # Ensure local directories exist
 mkdir -p "$LOCAL_CHECKPOINTS_DIR"
 mkdir -p "$LOCAL_EXPORTED_MODELS_DIR"
+mkdir -p "$LOCAL_CALIB_CACHE_DIR"
 
 echo "Building Docker image: $IMAGE_NAME..."
 # Build the Docker image
@@ -38,6 +41,7 @@ echo "Mounting $LOCAL_EXPORTED_MODELS_DIR to $CONTAINER_EXPORTED_MODELS_DIR"
 docker run -it --rm \
     -v "$(pwd)/$LOCAL_CHECKPOINTS_DIR:$CONTAINER_CHECKPOINTS_DIR" \
     -v "$(pwd)/$LOCAL_EXPORTED_MODELS_DIR:$CONTAINER_EXPORTED_MODELS_DIR" \
+    -v "$(pwd)/$LOCAL_CALIB_CACHE_DIR:$CONTAINER_CALIB_CACHE_DIR" \
     "$IMAGE_NAME" \
     --output-dir-cli "$CONTAINER_EXPORTED_MODELS_DIR"
 
