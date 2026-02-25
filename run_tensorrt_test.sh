@@ -6,14 +6,17 @@ IMAGE_NAME="pytorch-wildlife-export-trt"
 # Define local directories to be mounted
 LOCAL_CHECKPOINTS_DIR="checkpoints"
 LOCAL_EXPORTED_MODELS_DIR="exported_models"
+LOCAL_CALIB_CACHE_DIR="cache/calibration"
 
 # Define container paths for mounting
 CONTAINER_CHECKPOINTS_DIR="/root/.cache/torch/hub/checkpoints"
 CONTAINER_EXPORTED_MODELS_DIR="/exported_models"
+CONTAINER_CALIB_CACHE_DIR="/root/.cache/pytorch_wildlife_export/calibration"
 
 # Ensure local directories exist
 mkdir -p "$LOCAL_CHECKPOINTS_DIR"
 mkdir -p "$LOCAL_EXPORTED_MODELS_DIR"
+mkdir -p "$LOCAL_CALIB_CACHE_DIR"
 
 # Build the Docker image
 # TODO add back --no-cache for distribution
@@ -38,6 +41,7 @@ docker run -it --rm \
     -v "$(pwd)/$LOCAL_CHECKPOINTS_DIR:$CONTAINER_CHECKPOINTS_DIR" \
     -v "$(pwd)/$LOCAL_EXPORTED_MODELS_DIR:$CONTAINER_EXPORTED_MODELS_DIR" \
     -v "$(pwd)/$LOCAL_EXPORTED_MODELS_DIR:/app/PytorchWildlife_Export/demo/demo_output" \
+    -v "$(pwd)/$LOCAL_CALIB_CACHE_DIR:$CONTAINER_CALIB_CACHE_DIR" \
     -v "$(pwd):/app" \
     --entrypoint python3 \
     "$IMAGE_NAME" \
