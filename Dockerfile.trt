@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y cmake build-essential libxcb1 libgl1 li
 # Install Python dependencies
 # Use --no-cache-dir to prevent pip from storing downloaded packages, reducing image size
 # Ensure all dependencies, including textual and its development dependencies, are installed.
-RUN pip install --no-cache-dir -r ./PytorchWildlife_Export/requirements.txt && pip install --no-cache-dir onnxruntime-gpu
+RUN pip install --no-cache-dir -r ./PytorchWildlife_Export/requirements.txt
 
 # Copy the rest of your application code
 COPY . .
