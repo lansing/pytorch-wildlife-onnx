@@ -98,11 +98,11 @@ def main():
     parser.add_argument(
         "--num_calibration_images",
         type=int,
-        default=300,
+        default=500,
         help=(
             "Number of images to stream from the calibration dataset for INT8 "
             "TensorRT quantization. Only used when --runtime tensorrt and "
-            "--format int8. Default is 300."
+            "--format int8. Default is 500."
         ),
     )
 

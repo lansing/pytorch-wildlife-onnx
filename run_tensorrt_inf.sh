@@ -43,8 +43,10 @@ docker run -it --runtime nvidia --rm \
     -v "$(pwd)/$LOCAL_EXPORTED_MODELS_DIR:/app/PytorchWildlife_Export/demo/demo_output" \
     -v "$(pwd)/$LOCAL_CALIB_CACHE_DIR:$CONTAINER_CALIB_CACHE_DIR" \
     -v "$(pwd):/app" \
-    --entrypoint python3 \
+    --entrypoint trtexec \
     "$IMAGE_NAME" \
-    PytorchWildlife_Export/demo/yolov10_v9_trt.py
+    --loadEngine=/app/PytorchWildlife_Export/demo/demo_output/MDV6-yolov10-e_demo_export.engine \
+    --iterations=1000 \
+    --warmUp=200
 
 
