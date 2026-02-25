@@ -1,0 +1,33 @@
+# Use a Python base image
+FROM nvcr.io/nvidia/tensorrt:26.01-py3
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the requirements file first to leverage Docker cache
+COPY PytorchWildlife_Export/requirements.txt ./PytorchWildlife_Export/
+
+# Install cmake, required by some Python packages (e.g., onnx-simplifier)
+RUN apt-get update && apt-get install -y cmake build-essential libxcb1 libgl1 libsm6 libxext6 libxrender1 libjpeg-dev libpng-dev libtiff-dev libwebp-dev ffmpeg --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+# Use --no-cache-dir to prevent pip from storing downloaded packages, reducing image size
+# Ensure all dependencies, including textual and its development dependencies, are installed.
+RUN pip install --no-cache-dir -r ./PytorchWildlife_Export/requirements.txt && pip install --no-cache-dir onnxruntime-gpu
+
+# Copy the rest of your application code
+COPY . .
+
+# Create directories for mounted volumes if they don't exist
+# This ensures that even if volumes are not mounted, the paths exist inside the container
+RUN mkdir -p /app/checkpoints \
+           /app/exported_models \
+           /root/.cache/torch/hub/checkpoints
+
+# Set environment variable for unbuffered Python output (important for real-time logs)
+ENV PYTHONUNBUFFERED=1
+
+# Define the entrypoint to run the TUI script
+# The command will be overridden by the bash script to pass arguments
+ENTRYPOINT ["python", "PytorchWildlife_Export/tui_export.py"]
+
