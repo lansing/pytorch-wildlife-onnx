@@ -1,7 +1,11 @@
+import logging
 import os
 import shutil
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Literal
+
+LOGGER = logging.getLogger(__name__)
 
 import onnx
 import torch
@@ -71,10 +75,59 @@ class YOLOExporter(ABC):
         denormalized_input: bool = False,
         **kwargs,
     ) -> None:
-        trt_base_model_path = self.export_base_tensorrt(
-            model, output_path, input_shape, do_simplify
+        # Initialize PyTorch CUDA context BEFORE importing TensorRT.
+        # This ordering is critical — importing tensorrt before select_device can
+        # cause a cudaErrorNoDevice / CUDA initialization failure.
+        from ultralytics.utils.torch_utils import select_device
+
+        device = select_device("0", verbose=True)
+        LOGGER.info(f"Active device for TensorRT export: {device}")
+
+        try:
+            import tensorrt as trt  # noqa: F401
+
+            LOGGER.info(f"TensorRT imported successfully. Version: {trt.__version__}")
+        except ImportError:
+            raise RuntimeError(
+                "TensorRT is not installed. Cannot perform TensorRT export."
+            )
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error importing TensorRT: {e}") from e
+
+        onnx_base_model_path = self.export_base_onnx(
+            model,
+            output_path,
+            input_shape,
+            opset_version=opset_version,
+            do_simplify=do_simplify,
         )
-        shutil.copy(trt_base_model_path, output_path)
+        LOGGER.info(f"Intermediate ONNX model at: {onnx_base_model_path}")
+
+        # PLACEHOLDER: model merges (pre/post processing layers) will be applied here
+
+        from ultralytics.utils.export.engine import (
+            onnx2engine as ultralytics_onnx2engine,
+        )
+
+        engine_file = str(Path(output_path).with_suffix(".engine"))
+
+        ultralytics_onnx2engine(
+            onnx_file=str(onnx_base_model_path),
+            engine_file=engine_file,
+            workspace=4,
+            half=(export_format == "float16"),
+            int8=(export_format == "int8"),
+            dynamic=False,
+            shape=input_shape,
+            dla=None,
+            dataset=None,
+            metadata=None,  # prevents Ultralytics metadata header
+            verbose=False,
+            prefix="TRT Export: ",
+        )
+        LOGGER.info(f"TensorRT engine saved to: {engine_file}")
+        if engine_file != output_path:
+            shutil.copy(engine_file, output_path)
 
     def export_onnx(
         self,
@@ -174,49 +227,6 @@ class YOLOExporter(ABC):
             prefix2="YOLO",
         )
         return merged_model, pre_processor_input.shape
-
-    def export_base_tensorrt(
-        self,
-        model: nn.Module,
-        output_path,
-        input_shape,
-        do_simplify: bool,
-        **kwargs,
-    ):
-        export_kwargs = {
-            "format": "engine",
-            "imgsz": input_shape[2],
-            "batch": input_shape[0],
-            # "simplify": do_simplify,
-            # "workspace": 4,
-            # "half": False,  # do the 16 bit conversion later after we merge
-            # "half": True if export_format == "float16" else False,
-            # "int8": False,  # Force False here, as we will do static quantization separately if requested
-            "name": os.path.basename(output_path),
-            "exist_ok": True,
-            "nms": False,  # Force NMS to False for the raw output export
-            **kwargs,
-        }
-
-        trt_base_model_path = model.export(**export_kwargs)
-
-        with open(trt_base_model_path, "rb") as f:
-            data = f.read()
-
-        # Find the start of the TensorRT magic tag
-        # It usually starts with 'ptr' (binary for the TRT magic)
-        marker = b"ptr"
-        offset = data.find(marker)
-
-        if offset != -1:
-            trt_path = f"/tmp/{os.path.basename(output_path)}.engine"
-            print(f"Found TRT engine at offset: {offset}")
-            with open(trt_path, "wb") as f_out:
-                f_out.write(data[offset:])
-            print("Extracted raw_engine.engine successfully!")
-            return trt_path
-        else:
-            print("Could not find the TRT magic tag.")
 
     def export_base_onnx(
         self,
