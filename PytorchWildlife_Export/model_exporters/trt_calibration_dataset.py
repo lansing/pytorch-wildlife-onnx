@@ -37,6 +37,7 @@ class TRTCalibrationDataLoader:
         self.hf_dataset = hf_dataset
         self.hf_split = hf_split
         self.cache_dir = Path(cache_dir)
+        self.batch_size = 1  # EngineCalibrator reads this attribute
         self._images: list[torch.Tensor] | None = None  # loaded lazily on first iter
 
     def _cache_path(self) -> Path:
