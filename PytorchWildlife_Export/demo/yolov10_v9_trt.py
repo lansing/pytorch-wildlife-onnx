@@ -34,7 +34,7 @@ IOU_THRESHOLD = 0.45
 GLOBAL_CLASS_NAMES = {0: "animal", 1: "person", 2: "vehicle"}
 
 # Model parameters for YOLOv10 compatible export
-YOLOV10_COMPATIBLE_VERSION = "MDV6-yolov10-c"
+YOLOV10_COMPATIBLE_VERSION = "MDV6-yolov10-e"
 YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
     OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_demo_export.engine"
 )
@@ -108,18 +108,18 @@ def run_demo():
         YOLOV10_COMPATIBLE_ONNX_PATH,
         "--format",
         # "int8",
-        "float32",
-        # "float16",
+        # "float32",
+        "float16",
         "--opset",
         "18",
         "--runtime",
         "tensorrt",
         "--simplify",
         "--input_img_size",
-        "320",
-        # "--nhwc_input",
-        # "--denormalized_input",
-        # "--uint8_input",
+        "640",
+        "--nhwc_input",
+        "--denormalized_input",
+        "--uint8_input",
     ]
     sys.argv = export_tool_args  # Set sys.argv for argparse
     export_tool_main()  # Run the export tool
