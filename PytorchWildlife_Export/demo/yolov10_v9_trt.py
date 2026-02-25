@@ -107,9 +107,9 @@ def run_demo():
         "--output_path",
         YOLOV10_COMPATIBLE_ONNX_PATH,
         "--format",
-        # "int8",
+        "int8",
         # "float32",
-        "float16",
+        # "float16",
         "--opset",
         "18",
         "--runtime",
@@ -117,9 +117,9 @@ def run_demo():
         "--simplify",
         "--input_img_size",
         "640",
-        "--nhwc_input",
-        "--denormalized_input",
-        "--uint8_input",
+        # "--nhwc_input",
+        # "--denormalized_input",
+        # "--uint8_input",
     ]
     sys.argv = export_tool_args  # Set sys.argv for argparse
     export_tool_main()  # Run the export tool
