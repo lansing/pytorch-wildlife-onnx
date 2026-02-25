@@ -26,7 +26,7 @@ from PytorchWildlife_Export.postprocessors.yolov_postprocessor import YOLOvPostP
 SAMPLE_IMAGE_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "sample_image.jpg")
 )
-OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "demo_output"))
+OUTPUT_DIR = "/exported_models"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 CONFIDENCE_THRESHOLD = 0.25

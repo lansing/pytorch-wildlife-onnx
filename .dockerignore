@@ -1,3 +1,23 @@
+# Model artifacts — never bake weights or compiled engines into the image
+*.pt
+*.onnx
+*.engine
+*.npy
+onnxruntime_profile_*.json
+
+# Dev scratch files at repo root
+examine.py
+image_prep.py
+images/
+cache/
+CameraTraps/
+
+# Planning / notes docs (not needed inside container)
+PT_2_ONNX_2_TRT.md
+QUANTIZE_PLAN.md
+PREPROCESS_PLAN.md
+IMAGE_SHRINK.md
+
 # macOS
 .DS_Store
 .AppleDouble

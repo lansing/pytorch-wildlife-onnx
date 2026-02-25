@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import torch
 
@@ -107,6 +108,20 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # --- Guard: refuse to write model output inside the source package ---
+    _output = Path(args.output_path).resolve()
+    _pkg_root = Path(__file__).resolve().parent  # PytorchWildlife_Export/
+    try:
+        _output.relative_to(_pkg_root)
+        # If no ValueError: the path is inside the package tree — reject it.
+        print(
+            f"Error: --output_path must not be inside '{_pkg_root}'.\n"
+            f"  Use /exported_models or any path outside PytorchWildlife_Export."
+        )
+        sys.exit(1)
+    except ValueError:
+        pass  # Path is outside the package — allowed.
 
     # --- Load Model ---
     model_loader = None

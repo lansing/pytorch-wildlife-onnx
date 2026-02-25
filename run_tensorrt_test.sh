@@ -40,7 +40,6 @@ mkdir -p "$LOCAL_CALIB_CACHE_DIR"
 docker run -it --runtime nvidia --rm \
     -v "$(pwd)/$LOCAL_CHECKPOINTS_DIR:$CONTAINER_CHECKPOINTS_DIR" \
     -v "$(pwd)/$LOCAL_EXPORTED_MODELS_DIR:$CONTAINER_EXPORTED_MODELS_DIR" \
-    -v "$(pwd)/$LOCAL_EXPORTED_MODELS_DIR:/app/PytorchWildlife_Export/demo/demo_output" \
     -v "$(pwd)/$LOCAL_CALIB_CACHE_DIR:$CONTAINER_CALIB_CACHE_DIR" \
     -v "$(pwd):/app" \
     --entrypoint python3 \

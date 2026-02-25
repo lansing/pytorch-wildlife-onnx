@@ -6,11 +6,10 @@ torch
 torchvision
 pyyaml
 wget
-tensorboard
 onnx
 onnxscript
 onnxslim
 datasets
 Pillow
-opencv-python
-textual[dev]
+opencv-python-headless
+textual
