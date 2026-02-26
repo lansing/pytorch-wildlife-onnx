@@ -38,8 +38,9 @@ def _preprocessing_calibration_patch():
 
     Approach B from PREPROCESS_PLAN.md.
     """
-    import tensorrt as trt
     import types
+
+    import tensorrt as trt
 
     _orig_builder_cls = trt.Builder
 
@@ -225,6 +226,7 @@ class YOLOExporter(ABC):
         from ultralytics.utils.export.engine import (
             onnx2engine as ultralytics_onnx2engine,
         )
+
         from PytorchWildlife_Export.model_exporters.trt_calibration_dataset import (
             TRTCalibrationDataLoader,
         )
@@ -253,14 +255,18 @@ class YOLOExporter(ABC):
         # dtype or range, so we must patch trt.Builder so the local
         # EngineCalibrator inside onnx2engine delivers data as-is.
         needs_patch = export_format == "int8" and (uint8_input or denormalized_input)
-        patch_ctx = _preprocessing_calibration_patch() if needs_patch else contextmanager(lambda: (yield))()
+        patch_ctx = (
+            _preprocessing_calibration_patch()
+            if needs_patch
+            else contextmanager(lambda: (yield))()
+        )
 
         with patch_ctx:
             ultralytics_onnx2engine(
                 onnx_file=merged_onnx_tmp_path,
                 engine_file=engine_file,
                 workspace=4,
-                half=(export_format == "float16"),
+                half=(export_format == "float16" or export_format == "int8"),
                 int8=(export_format == "int8"),
                 dynamic=False,
                 shape=tuple(final_input_shape),

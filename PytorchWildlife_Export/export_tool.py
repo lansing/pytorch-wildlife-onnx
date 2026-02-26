@@ -159,9 +159,7 @@ def main(args=None):
     exported_path = args.output_path
     os.makedirs(os.path.dirname(exported_path), exist_ok=True)
 
-    num_classes = (
-        len(model_pt.model.names) if hasattr(model_pt.model, "names") else 3
-    )
+    num_classes = len(model_pt.model.names) if hasattr(model_pt.model, "names") else 3
     export_kwargs = dict(
         model=model_pt,
         output_path=args.output_path,
