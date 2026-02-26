@@ -13,9 +13,7 @@ if project_top_level not in sys.path:
     sys.path.insert(0, project_top_level)
 
 # Import necessary components
-from PytorchWildlife_Export.export_tool import (
-    main as export_tool_main,  # Import the main function of export_tool
-)
+from PytorchWildlife_Export.export_tool import main as export_tool_main, parse_args as export_parse_args
 from PytorchWildlife_Export.inference_utils.onnx_inference import ONNXInferenceSession
 from PytorchWildlife_Export.postprocessors.ultralytics_baseline_utils import (
     get_ultralytics_baseline_detections,
@@ -98,29 +96,20 @@ def run_demo():
     print("\n--- Step 1: Export YOLOv10 (v9 Compatible Output) Model ---")
 
     # Export the YOLOv10 model with v9 compatible output
-    export_tool_args = [
-        "export_tool.py",  # dummy arg for argparse
-        "--model_type",
-        "yolov10_v9_compatible",
-        "--model_version",
-        YOLOV10_COMPATIBLE_VERSION,
-        "--output_path",
-        YOLOV10_COMPATIBLE_ONNX_PATH,
-        "--format",
-        # "int8",
-        "float32",
-        # "float16",
-        "--opset",
-        "18",
+    export_tool_main(export_parse_args([
+        "--model_type", "yolov10_v9_compatible",
+        "--model_version", YOLOV10_COMPATIBLE_VERSION,
+        "--output_path", YOLOV10_COMPATIBLE_ONNX_PATH,
+        # "--format", "int8",
+        "--format", "float32",
+        # "--format", "float16",
+        "--opset", "18",
         "--simplify",
-        "--input_img_size",
-        "320",
+        "--input_img_size", "320",
         # "--nhwc_input",
         # "--denormalized_input",
         # "--uint8_input",
-    ]
-    sys.argv = export_tool_args  # Set sys.argv for argparse
-    export_tool_main()  # Run the export tool
+    ]))
 
     print("\n--- Step 2: Run Inference on the YOLOv10 (v9 Compatible) Model ---")
     inference_session = ONNXInferenceSession(
@@ -162,24 +151,15 @@ def run_demo():
     # Export the original YOLOv10 raw model for baseline if it doesn't exist
     if not os.path.exists(YOLOV10_ORIGINAL_ONNX_PATH):
         print(f"Exporting original YOLOv10 raw model to: {YOLOV10_ORIGINAL_ONNX_PATH}")
-        export_tool_args = [
-            "export_tool.py",
-            "--model_type",
-            "yolov9",  # Use yolov9 model_type for original YOLOv10 export
-            "--model_version",
-            YOLOV10_COMPATIBLE_VERSION,
-            "--output_path",
-            YOLOV10_ORIGINAL_ONNX_PATH,
-            "--format",
-            "float32",
-            "--opset",
-            "18",
+        export_tool_main(export_parse_args([
+            "--model_type", "yolov9",
+            "--model_version", YOLOV10_COMPATIBLE_VERSION,
+            "--output_path", YOLOV10_ORIGINAL_ONNX_PATH,
+            "--format", "float32",
+            "--opset", "18",
             "--simplify",
-            "--input_img_size",
-            "1280",
-        ]
-        sys.argv = export_tool_args
-        export_tool_main()
+            "--input_img_size", "1280",
+        ]))
 
     ultralytics_detections = get_ultralytics_baseline_detections(
         onnx_model_path=YOLOV10_ORIGINAL_ONNX_PATH,

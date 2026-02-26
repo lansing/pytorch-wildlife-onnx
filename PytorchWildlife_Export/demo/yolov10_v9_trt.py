@@ -1,10 +1,11 @@
-import argparse
 import os
+import statistics
 import sys
+import time
 from typing import Dict, List
 
-import cv2
 import numpy as np
+import torch
 from PIL import Image, ImageDraw, ImageFont
 
 # Add the project's top-level directory to the Python path
@@ -13,13 +14,8 @@ if project_top_level not in sys.path:
     sys.path.insert(0, project_top_level)
 
 # Import necessary components
-from PytorchWildlife_Export.export_tool import (
-    main as export_tool_main,  # Import the main function of export_tool
-)
-from PytorchWildlife_Export.inference_utils.onnx_inference import ONNXInferenceSession
-from PytorchWildlife_Export.postprocessors.ultralytics_baseline_utils import (
-    get_ultralytics_baseline_detections,
-)
+from PytorchWildlife_Export.export_tool import main as export_tool_main, parse_args as export_parse_args
+from PytorchWildlife_Export.inference_utils.onnx_inference import preprocess_image
 from PytorchWildlife_Export.postprocessors.yolov_postprocessor import YOLOvPostProcessor
 
 # --- Configuration ---
@@ -41,11 +37,6 @@ YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
 # YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
 #     "exported_models/MDV6-yolov10-c_float16_320_v9_compat_denorm_nhwc.onnx"
 # )
-
-
-YOLOV10_ORIGINAL_ONNX_PATH = os.path.join(
-    OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_320_raw.onnx"
-)
 
 
 # --- Helper for Visualization ---
@@ -98,125 +89,133 @@ def run_demo():
     print("\n--- Step 1: Export YOLOv10 (v9 Compatible Output) Model ---")
 
     # Export the YOLOv10 model with v9 compatible output
-    export_tool_args = [
-        "export_tool.py",  # dummy arg for argparse
-        "--model_type",
-        "yolov10_v9_compatible",
-        "--model_version",
-        YOLOV10_COMPATIBLE_VERSION,
-        "--output_path",
-        YOLOV10_COMPATIBLE_ONNX_PATH,
-        "--format",
-        "int8",
-        # "float32",
-        #"float16",
-        "--opset",
-        "18",
-        "--runtime",
-        "tensorrt",
+    export_args = export_parse_args([
+        "--model_type", "yolov10_v9_compatible",
+        "--model_version", YOLOV10_COMPATIBLE_VERSION,
+        "--output_path", YOLOV10_COMPATIBLE_ONNX_PATH,
+        "--format", "int8",
+        # "--format", "float32",
+        # "--format", "float16",
+        "--opset", "18",
+        "--runtime", "tensorrt",
         "--simplify",
-        "--input_img_size",
-        "640",
-        #"--nhwc_input",
-        #"--denormalized_input",
-        #"--uint8_input",
-    ]
-    sys.argv = export_tool_args  # Set sys.argv for argparse
-    export_tool_main()  # Run the export tool
+        "--input_img_size", "640",
+        # "--nhwc_input",
+        # "--denormalized_input",
+        # "--uint8_input",
+    ])
+    export_tool_main(export_args)
 
-    # TODO temp disable inf (need to do it in trt)
-    return
+    print("\n--- Step 2: Inference Validation (TensorRT engine) ---")
 
-    print("\n--- Step 2: Run Inference on the YOLOv10 (v9 Compatible) Model ---")
-    inference_session = ONNXInferenceSession(
-        onnx_model_path=YOLOV10_COMPATIBLE_ONNX_PATH,
-        # normalize=False,  # TODO for now, we are testing non-normalized float
+    import tensorrt as trt
+
+    trt_logger = trt.Logger(trt.Logger.WARNING)
+    with open(YOLOV10_COMPATIBLE_ONNX_PATH, "rb") as f:
+        engine_bytes = f.read()
+    runtime = trt.Runtime(trt_logger)
+    engine = runtime.deserialize_cuda_engine(engine_bytes)
+    context = engine.create_execution_context()
+
+    # Discover I/O tensor names and shapes from the engine
+    input_name = None
+    output_name = None
+    input_shape = None
+    output_shape = None
+    for i in range(engine.num_io_tensors):
+        name = engine.get_tensor_name(i)
+        mode = engine.get_tensor_mode(name)
+        shape = tuple(engine.get_tensor_shape(name))
+        if mode == trt.TensorIOMode.INPUT:
+            input_name = name
+            input_shape = shape
+        else:
+            output_name = name
+            output_shape = shape
+    print(f"Engine input:  {input_name} {input_shape}")
+    print(f"Engine output: {output_name} {output_shape}")
+
+    # Preprocess sample image — derive format from the export args used above
+    tensor_format = "nhwc" if export_args.nhwc_input else "nchw"
+    normalize = not (export_args.uint8_input or export_args.denormalized_input)
+    preprocessed, original_dims, ratio_pad = preprocess_image(
+        SAMPLE_IMAGE_PATH,
+        list(input_shape),
+        tensor_format=tensor_format,
+        normalize=normalize,
+        uint8_input=export_args.uint8_input,
     )
-    custom_post_processor = YOLOvPostProcessor()  # Use YOLOv9 post-processor
 
-    custom_detections = inference_session.run_inference(
-        image_path=SAMPLE_IMAGE_PATH,
-        post_processor=custom_post_processor,
+    # Allocate GPU buffers
+    input_gpu = torch.from_numpy(preprocessed).contiguous().cuda()
+    output_gpu = torch.empty(output_shape, dtype=torch.float32, device="cuda")
+
+    context.set_tensor_address(input_name, input_gpu.data_ptr())
+    context.set_tensor_address(output_name, output_gpu.data_ptr())
+
+    stream = torch.cuda.current_stream().cuda_stream
+    context.execute_async_v3(stream_handle=stream)
+    torch.cuda.synchronize()
+
+    raw_output = output_gpu.cpu().numpy()
+    post_processor = YOLOvPostProcessor()
+    detections = post_processor.postprocess(
+        raw_output=raw_output,
+        original_dims=original_dims,
+        input_shape=list(input_shape),
         confidence_threshold=CONFIDENCE_THRESHOLD,
         iou_threshold=IOU_THRESHOLD,
         class_names=GLOBAL_CLASS_NAMES,
+        ratio_pad=ratio_pad,
     )
-
-    output_image_custom_path = os.path.join(
-        OUTPUT_DIR,
-        f"detected_sample_image_{YOLOV10_COMPATIBLE_VERSION}_v9_compatible_custom_pp.jpg",
-    )
-    print(f"Custom Post-Processor found {len(custom_detections)} detections.")
-    for det in custom_detections:
+    print(f"TRT inference found {len(detections)} detections.")
+    for det in detections:
         print(
-            f"  Custom - Class: {det['class_name']} ({det['class_id']}), Confidence: {det['confidence']:.2f}, Box: {det['box']}"
+            f"  Class: {det['class_name']} ({det['class_id']}), "
+            f"Confidence: {det['confidence']:.2f}, Box: {det['box']}"
         )
+
+    output_image_path = os.path.join(
+        OUTPUT_DIR,
+        f"detected_sample_image_{YOLOV10_COMPATIBLE_VERSION}_trt.jpg",
+    )
     visualize_detections(
         SAMPLE_IMAGE_PATH,
-        custom_detections,
-        output_image_custom_path,
+        detections,
+        output_image_path,
         GLOBAL_CLASS_NAMES,
-        title=f"V10 (v9-comp) Custom PP",
+        title=f"TRT: {YOLOV10_COMPATIBLE_VERSION}",
     )
 
-    return
+    print("\n--- Step 3: Latency Benchmark (TensorRT engine) ---")
 
-    print(
-        "\n--- Step 3: Run Ultralytics Baseline on Original YOLOv10 Model for Comparison ---"
-    )
-    # Export the original YOLOv10 raw model for baseline if it doesn't exist
-    if not os.path.exists(YOLOV10_ORIGINAL_ONNX_PATH):
-        print(f"Exporting original YOLOv10 raw model to: {YOLOV10_ORIGINAL_ONNX_PATH}")
-        export_tool_args = [
-            "export_tool.py",
-            "--model_type",
-            "yolov9",  # Use yolov9 model_type for original YOLOv10 export
-            "--model_version",
-            YOLOV10_COMPATIBLE_VERSION,
-            "--output_path",
-            YOLOV10_ORIGINAL_ONNX_PATH,
-            "--format",
-            "float32",
-            "--opset",
-            "18",
-            "--simplify",
-            "--input_img_size",
-            "1280",
-        ]
-        sys.argv = export_tool_args
-        export_tool_main()
+    WARMUP_STEPS = 50
+    TIMED_STEPS = 100
 
-    ultralytics_detections = get_ultralytics_baseline_detections(
-        onnx_model_path=YOLOV10_ORIGINAL_ONNX_PATH,
-        image_path=SAMPLE_IMAGE_PATH,
-        confidence_threshold=CONFIDENCE_THRESHOLD,
-        iou_threshold=IOU_THRESHOLD,
-        input_img_size=1280,  # Hardcoded for now
-        class_names=GLOBAL_CLASS_NAMES,
-    )
+    input_cpu = torch.from_numpy(preprocessed).contiguous()
+    latencies_ms = []
 
-    output_image_baseline_path = os.path.join(
-        OUTPUT_DIR,
-        f"detected_sample_image_{YOLOV10_COMPATIBLE_VERSION}_original_ultralytics_baseline.jpg",
-    )
-    print(f"Ultralytics Baseline found {len(ultralytics_detections)} detections.")
-    for det in ultralytics_detections:
-        print(
-            f"  Baseline - Class: {det['class_name']} ({det['class_id']}), Confidence: {det['confidence']:.2f}, Box: {det['box']}"
-        )
-    visualize_detections(
-        SAMPLE_IMAGE_PATH,
-        ultralytics_detections,
-        output_image_baseline_path,
-        GLOBAL_CLASS_NAMES,
-        title=f"UL Baseline: {YOLOV10_COMPATIBLE_VERSION} Original",
-    )
+    for step in range(WARMUP_STEPS + TIMED_STEPS):
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        input_gpu.copy_(input_cpu)  # H2D
+        context.execute_async_v3(stream_handle=stream)
+        _ = output_gpu.cpu()  # D2H
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        if step >= WARMUP_STEPS:
+            latencies_ms.append((t1 - t0) * 1000.0)
 
-    print("\n--- Comparison ---")
-    print(f"Custom PP (V10 compatible) Detections: {len(custom_detections)}")
-    print(
-        f"Ultralytics Baseline (V10 Original) Detections: {len(ultralytics_detections)}"
-    )
+    avg_ms = statistics.mean(latencies_ms)
+    p50_ms = statistics.median(latencies_ms)
+    p99_ms = sorted(latencies_ms)[int(len(latencies_ms) * 0.99) - 1]
+    fps = 1000.0 / avg_ms
+
+    print(f"Benchmark results over {TIMED_STEPS} timed steps (after {WARMUP_STEPS} warmup):")
+    print(f"  Avg latency : {avg_ms:.2f} ms")
+    print(f"  P50 latency : {p50_ms:.2f} ms")
+    print(f"  P99 latency : {p99_ms:.2f} ms")
+    print(f"  Throughput  : {fps:.1f} FPS")
 
 
 if __name__ == "__main__":

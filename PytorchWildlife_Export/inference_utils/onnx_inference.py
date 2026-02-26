@@ -23,6 +23,74 @@ except ImportError:
     print("Ultralytics not found. YOLO-specific features might be limited.")
 
 
+def preprocess_image(
+    image_path: str,
+    input_shape: list,
+    tensor_format: str = "nchw",
+    normalize: bool = True,
+    uint8_input: bool = False,
+) -> Tuple[np.ndarray, Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]]:
+    """
+    Preprocess a single image into the tensor format expected by the model.
+
+    Performs letterbox resize + pad, then converts to the requested dtype/layout.
+
+    Args:
+        image_path: Path to the input image.
+        input_shape: Model input shape.
+            NCHW → [batch, C, H, W]; NHWC → [batch, H, W, C].
+        tensor_format: "nchw" or "nhwc".
+        normalize: Divide pixel values by 255 to produce float32 in [0, 1].
+            Ignored when uint8_input=True.
+        uint8_input: Return raw uint8 pixels without any normalization or cast.
+
+    Returns:
+        preprocessed: np.ndarray with a batch dimension prepended.
+        original_dims: (width, height) of the source image.
+        ratio_pad: ((gain, gain), (pad_left, pad_top)) for box rescaling.
+    """
+    original_image = cv2.imread(image_path)
+    if original_image is None:
+        raise FileNotFoundError(f"Image not found at {image_path}")
+
+    original_dims = (original_image.shape[1], original_image.shape[0])  # (w, h)
+    img_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+
+    shape = img_rgb.shape[:2]  # (h, w)
+    if tensor_format == "nchw":
+        new_shape = (input_shape[2], input_shape[3])  # (H, W)
+    else:
+        new_shape = (input_shape[1], input_shape[2])  # (H, W)
+
+    r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    new_unpad = (int(round(shape[1] * r)), int(round(shape[0] * r)))  # (w, h)
+    dw = (new_shape[1] - new_unpad[0]) / 2
+    dh = (new_shape[0] - new_unpad[1]) / 2
+
+    img_resized = cv2.resize(img_rgb, new_unpad, interpolation=cv2.INTER_LINEAR)
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    padded = cv2.copyMakeBorder(
+        img_resized, top, bottom, left, right,
+        cv2.BORDER_CONSTANT, value=(114, 114, 114),
+    )
+
+    ratio_pad = ((r, r), (left, top))
+
+    if uint8_input:
+        img_out = padded  # uint8
+    elif normalize:
+        img_out = padded.astype(np.float32) / 255.0
+    else:
+        img_out = padded.astype(np.float32)  # denormalized float, range 0-255
+
+    if tensor_format == "nchw":
+        img_out = np.transpose(img_out, (2, 0, 1))  # HWC → CHW
+
+    img_out = np.expand_dims(img_out, 0)  # add batch dim
+    return img_out, original_dims, ratio_pad
+
+
 class ONNXInferenceSession:
     """
     Manages ONNX model loading, inference execution, and post-processing for object detection.
@@ -76,106 +144,15 @@ class ONNXInferenceSession:
     ) -> Tuple[
         np.ndarray, Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]
     ]:
-        """
-        Preprocesses a single image to the format expected by the ONNX model for onnxruntime.
-        Implements ultralytics LetterBox functionality to maintain aspect ratio and pad.
-
-        Args:
-            image_path (str): Path to the input image.
-
-        Returns:
-            Tuple[np.ndarray, Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]]:
-                - preprocessed_image_bchw: The preprocessed image as a NumPy array (BCHW).
-                - original_dims: Original (width, height) of the image.
-                - ratio_pad: ((gain, gain), (pad_x, pad_y)) for scaling boxes back.
-        """
-        original_image = cv2.imread(image_path)
-        if original_image is None:
-            raise FileNotFoundError(f"Image not found at {image_path}")
-
-        original_dims = (
-            original_image.shape[1],
-            original_image.shape[0],
-        )  # (width, height)
-
-        # 1. LetterBox Resizing and Padding
-        img_rgb = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)  # Convert to RGB
-
-        shape = img_rgb.shape[:2]  # current shape [height, width]
-
-        if self.tensor_format == "nchw":
-            new_shape = (
-                self.input_shape[2],
-                self.input_shape[3],
-            )  # target shape [height, width]
-        else:
-            new_shape = (self.input_shape[1], self.input_shape[2])
-
-        # Scale ratio (new / old)
-        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-        # Allow scaling up (default in ultralytics for LetterBox is scaleup=True)
-        # r = min(r, 1.0) # only scale down (original is commented out, so we follow ultralytics default)
-
-        # Compute padding
-        new_unpad = (
-            int(round(shape[1] * r)),
-            int(round(shape[0] * r)),
-        )  # new_unpad width, height
-        dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]  # wh padding
-
-        # Auto padding (ultralytics uses this if auto=True, which is not default for LetterBox directly)
-        # For simplicity, assuming auto=False and center padding for now.
-        # if auto: # minimum rectangle
-        #     dw, dh = np.mod(dw, self.stride), np.mod(dh, self.stride) # wh padding
-
-        # Center padding (default in ultralytics LetterBox)
-        dw /= 2  # divide padding into 2 sides
-        dh /= 2
-
-        if shape[::-1] != new_unpad:  # resize if needed
-            img_resized = cv2.resize(img_rgb, new_unpad, interpolation=cv2.INTER_LINEAR)
-        else:
-            img_resized = img_rgb
-
-        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-
-        # padding_value = 114 (default in ultralytics LetterBox)
-        padded_image = cv2.copyMakeBorder(
-            img_resized,
-            top,
-            bottom,
-            left,
-            right,
-            cv2.BORDER_CONSTANT,
-            value=(114, 114, 114),
+        """Delegates to the module-level preprocess_image utility."""
+        uint8 = bool(self.input_type and "uint8" in self.input_type)
+        return preprocess_image(
+            image_path,
+            self.input_shape,
+            tensor_format=self.tensor_format,
+            normalize=self.normalize,
+            uint8_input=uint8,
         )
-
-        # Store ratio_pad for post-processing bounding boxes
-        gain = r
-        pad_x, pad_y = left, top  # These are the actual left and top padding amounts
-        ratio_pad = ((gain, gain), (pad_x, pad_y))
-
-        # 2. Normalize pixel values to [0, 1]
-        if self.normalize:
-            preprocessed_image = padded_image.astype(np.float32) / 255.0
-        else:
-            if self.input_type and "uint8" in self.input_type:
-                preprocessed_image = padded_image
-            else:
-                preprocessed_image = padded_image.astype(np.float32)
-
-        # 3. Transpose to BCHW
-        if self.tensor_format == "nchw":
-            preprocessed_image = np.transpose(
-                preprocessed_image, (2, 0, 1)
-            )  # HWC to CHW
-
-        preprocessed_image = np.expand_dims(
-            preprocessed_image, axis=0
-        )  # Add batch dimension
-
-        return preprocessed_image, original_dims, ratio_pad
 
     def run_inference(
         self,
