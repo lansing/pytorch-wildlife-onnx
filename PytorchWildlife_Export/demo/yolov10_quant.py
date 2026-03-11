@@ -147,31 +147,26 @@ def run_demo():
 
     base_model = onnx.load(YOLOV10_COMPATIBLE_ONNX_PATH)
 
-    calib_loader = TRTCalibrationDataLoader(
-        input_size=640,
-        num_images=NUM_CALIB_IMAGES,
-    )
-    model = wrap_nodes_in_int8_qdq(
-        base_model,
-        calib_loader,
-        node_types=["Conv", "MatMul", "SiLU"],
-        exclude=[
-            # cv3 class-score output heads (1 per detection scale, 3-ch output)
-            "YOLO/model.23/one2one_cv3.0/one2one_cv3.0.2/Conv",
-            "YOLO/model.23/one2one_cv3.1/one2one_cv3.1.2/Conv",
-            "YOLO/model.23/one2one_cv3.2/one2one_cv3.2.2/Conv",
-            # cv2 box-regression output heads (1 per detection scale, 64-ch output)
-            "YOLO/model.23/one2one_cv2.0/one2one_cv2.0.2/Conv",
-            "YOLO/model.23/one2one_cv2.1/one2one_cv2.1.2/Conv",
-            "YOLO/model.23/one2one_cv2.2/one2one_cv2.2.2/Conv",
-            # DFL expected-value layer (weights are fixed [0..15], input is Softmax)
-            "YOLO/model.23/dfl/conv/Conv",
-            # MatMul V × A^T, input is Softmax
-            "YOLO/model.10/attn/MatMul_1",
-        ],
-        # TODO could play with SiLU some more
-        max_index={"MatMul": 1, "SiLU": 62},
-    )
+    do_quant = True
+
+    if do_quant:
+        calib_loader = TRTCalibrationDataLoader(
+            input_size=640,
+            num_images=NUM_CALIB_IMAGES,
+        )
+
+        model = wrap_nodes_in_int8_qdq(
+            base_model,
+            calib_loader,
+            # node_types not set → no bulk type-based quantization
+            node_names=[
+                # Heaviest node from profile (~15% of total runtime)
+                "YOLO/model.23/one2one_cv3.2/one2one_cv3.2.0/one2one_cv3.2.0.0/conv/Conv",
+            ],
+        )
+    else:
+        model = base_model
+
     mixed_onnx_path = YOLOV10_COMPATIBLE_ONNX_PATH.replace(".onnx", "_mixed_int8.onnx")
     onnx.save(model, mixed_onnx_path)
     print(f"INT8 QDQ model saved to: {mixed_onnx_path}")

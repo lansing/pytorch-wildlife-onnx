@@ -172,6 +172,69 @@ class ONNXInferenceSession:
             uint8_input=uint8,
         )
 
+    def benchmark(
+        self,
+        image_path: str,
+        warmup: int = 20,
+        iterations: int = 100,
+    ) -> dict:
+        """
+        Run warmup + timed inference iterations and flush the ORT profiling file.
+
+        ORT profiling cannot be paused mid-session, so warmup events are recorded
+        alongside measurement events. The returned metadata (warmup_runs, total_runs)
+        lets the profile_analysis script skip warmup events by timestamp order.
+
+        Args:
+            image_path: Path to a representative input image (preprocessed once).
+            warmup: Number of warmup iterations (hardware stabilisation + JIT caching).
+            iterations: Number of timed measurement iterations.
+
+        Returns:
+            dict with keys:
+                profile_path  – absolute path to the ORT JSON profiling file
+                warmup_runs   – number of warmup runs recorded before measurement
+                total_runs    – warmup + iterations (total runs in the profile file)
+                latencies_ms  – list of per-iteration wall-clock latencies (measurement only)
+                mean_ms       – mean latency over measurement iterations
+                p50_ms        – median latency
+                p99_ms        – 99th-percentile latency
+        """
+        import time
+
+        preprocessed, _, _ = self.preprocess_image(image_path)
+
+        print(f"Benchmarking: {warmup} warmup + {iterations} measurement runs...")
+
+        # Warmup — profiling is live but these events will be skipped in analysis
+        for i in range(warmup):
+            self.session.run([self.output_name], {self.input_name: preprocessed})
+        print(f"  Warmup complete ({warmup} runs).")
+
+        # Measurement
+        latencies_ms = []
+        for i in range(iterations):
+            t0 = time.perf_counter()
+            self.session.run([self.output_name], {self.input_name: preprocessed})
+            latencies_ms.append((time.perf_counter() - t0) * 1000.0)
+            if (i + 1) % 25 == 0:
+                print(f"  [{i+1}/{iterations}] avg so far: {sum(latencies_ms)/len(latencies_ms):.2f} ms")
+
+        profile_path = self.session.end_profiling()
+        print(f"  Profile saved: {profile_path}")
+
+        latencies_ms.sort()
+        n = len(latencies_ms)
+        return {
+            "profile_path": profile_path,
+            "warmup_runs": warmup,
+            "total_runs": warmup + iterations,
+            "latencies_ms": latencies_ms,
+            "mean_ms": sum(latencies_ms) / n,
+            "p50_ms": latencies_ms[n // 2],
+            "p99_ms": latencies_ms[int(n * 0.99)],
+        }
+
     def run_inference(
         self,
         image_path: str,

@@ -618,6 +618,7 @@ def wrap_nodes_in_int8_qdq(
     node_types: list = None,
     exclude: list = None,
     max_index: dict = None,
+    node_names: list = None,
 ) -> onnx.ModelProto:
     """
     Calibrates and wraps nodes in INT8 QDQ pairs.
@@ -626,25 +627,35 @@ def wrap_nodes_in_int8_qdq(
         model: A loaded float32 ONNX ModelProto.
         calibration_loader: A TRTCalibrationDataLoader instance.
         node_types: Op types to quantize (e.g. ``['Conv']``).
-            Defaults to ``['Conv']``.
+            Defaults to ``['Conv']`` when neither node_types nor node_names
+            is provided. Pass an empty list ``[]`` to suppress type-based
+            selection entirely and rely solely on node_names.
         exclude: List of substrings or exact node names. Any node whose name
-            contains at least one of these strings is skipped
-            (e.g. ``['model.23/dfl']`` or a full node name).
+            contains at least one of these strings is skipped during
+            type-based selection. Does not affect node_names entries.
             Defaults to no exclusions.
         max_index: Per-op-type topological index cap (e.g. ``{'Conv': 60}``
             to consider only the first 60 Conv nodes in graph order before
             applying the exclude filter).  Op types absent from the dict are
             uncapped.  Defaults to no cap.
+        node_names: Explicit list of node names to quantize, regardless of
+            op type, exclude list, or max_index. Added after type-based
+            selection; duplicates are silently dropped. Use this to target
+            specific high-cost nodes by name (e.g. from profile_analysis
+            output) without enabling bulk type-based quantization.
 
     Returns:
         A new ModelProto with the selected nodes wrapped in INT8 QDQ.
     """
-    if node_types is None:
-        node_types = ["Conv"]
+    if node_names is None:
+        node_names = []
     if exclude is None:
         exclude = []
     if max_index is None:
         max_index = {}
+    # Only default to Conv when neither selector is specified
+    if node_types is None:
+        node_types = [] if node_names else ["Conv"]
 
     # Pre-build SiLU map once (used for "SiLU" pseudo-type and for calibration overrides)
     silu_map = _find_silu_muls(model)  # {mul_node_name: x_tensor_name}
@@ -681,6 +692,23 @@ def wrap_nodes_in_int8_qdq(
         if op_type == "SiLU":
             for n in selected:
                 act_in_overrides[n.name] = silu_map[n.name]
+
+    # Resolve explicitly named nodes and append (deduplicating against type-selected set)
+    if node_names:
+        node_map = {n.name: n for n in model.graph.node}
+        already = {n.name for n in targets}
+        named_targets = []
+        for name in node_names:
+            if name in already:
+                print(f"  [node_names] '{name}' already selected via node_types, skipping duplicate")
+                continue
+            if name not in node_map:
+                raise ValueError(f"node_names: node '{name}' not found in graph")
+            named_targets.append(node_map[name])
+        print(f"  Explicit node_names: {len(named_targets)} node(s)")
+        for n in named_targets:
+            print(f"    {n.op_type} '{n.name}'")
+        targets.extend(named_targets)
 
     target_names = [n.name for n in targets]
     print(f"Total nodes to quantize: {len(target_names)}")
