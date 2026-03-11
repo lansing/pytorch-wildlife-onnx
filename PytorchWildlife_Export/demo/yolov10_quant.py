@@ -24,6 +24,15 @@ from PytorchWildlife_Export.inference_utils.onnx_inference import (
     ONNXInferenceSession,
     preprocess_image,
 )
+from PytorchWildlife_Export.model_exporters.quant import (
+    calibrate_node_scales,
+    wrap_conv_nodes_in_fp16,
+    wrap_node_in_int8_qdq,
+    wrap_nodes_in_int8_qdq,
+)
+from PytorchWildlife_Export.model_exporters.trt_calibration_dataset import (
+    TRTCalibrationDataLoader,
+)
 from PytorchWildlife_Export.postprocessors.yolov10_postprocessor import (
     YOLOv10PostProcessor,
 )
@@ -105,16 +114,14 @@ def run_demo():
             "--output_path",
             YOLOV10_COMPATIBLE_ONNX_PATH,
             "--format",
-            # "int8",
-            # "--format", "float32",
-            "float16",
+            "float32",
             "--opset",
             "18",
             "--runtime",
             "onnx",
             "--simplify",
             "--input_img_size",
-            "320",
+            "640",
             # "--nhwc_input",
             # "--denormalized_input",
             # "--uint8_input",
@@ -130,11 +137,50 @@ def run_demo():
 
     export_tool_main(export_args)
 
+    print(
+        "\n--- Step 1b: Calibrate + wrap Conv nodes in INT8 QDQ (exclude model.23) ---"
+    )
+
+    import onnx
+
+    NUM_CALIB_IMAGES = 50
+
+    base_model = onnx.load(YOLOV10_COMPATIBLE_ONNX_PATH)
+
+    calib_loader = TRTCalibrationDataLoader(
+        input_size=640,
+        num_images=NUM_CALIB_IMAGES,
+    )
+    model = wrap_nodes_in_int8_qdq(
+        base_model,
+        calib_loader,
+        node_types=["Conv", "MatMul", "SiLU"],
+        exclude=[
+            # cv3 class-score output heads (1 per detection scale, 3-ch output)
+            "YOLO/model.23/one2one_cv3.0/one2one_cv3.0.2/Conv",
+            "YOLO/model.23/one2one_cv3.1/one2one_cv3.1.2/Conv",
+            "YOLO/model.23/one2one_cv3.2/one2one_cv3.2.2/Conv",
+            # cv2 box-regression output heads (1 per detection scale, 64-ch output)
+            "YOLO/model.23/one2one_cv2.0/one2one_cv2.0.2/Conv",
+            "YOLO/model.23/one2one_cv2.1/one2one_cv2.1.2/Conv",
+            "YOLO/model.23/one2one_cv2.2/one2one_cv2.2.2/Conv",
+            # DFL expected-value layer (weights are fixed [0..15], input is Softmax)
+            "YOLO/model.23/dfl/conv/Conv",
+            # MatMul V × A^T, input is Softmax
+            "YOLO/model.10/attn/MatMul_1",
+        ],
+        # TODO could play with SiLU some more
+        max_index={"MatMul": 1, "SiLU": 62},
+    )
+    mixed_onnx_path = YOLOV10_COMPATIBLE_ONNX_PATH.replace(".onnx", "_mixed_int8.onnx")
+    onnx.save(model, mixed_onnx_path)
+    print(f"INT8 QDQ model saved to: {mixed_onnx_path}")
+
     print("\n--- Step 2: Run Inference on the YOLOv10 (v9 Compatible) Model ---")
 
     custom_post_processor = YOLOv10PostProcessor()  # Use YOLOv10 post-processor
     inference_session = ONNXInferenceSession(
-        onnx_model_path=YOLOV10_COMPATIBLE_ONNX_PATH,
+        onnx_model_path=mixed_onnx_path,
         # normalize=False,  # TODO for now, we are testing non-normalized float
         preferred_provider="CUDAExecutionProvider",
     )
