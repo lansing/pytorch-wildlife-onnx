@@ -14,7 +14,10 @@ if project_top_level not in sys.path:
     sys.path.insert(0, project_top_level)
 
 # Import necessary components
-from PytorchWildlife_Export.export_tool import main as export_tool_main, parse_args as export_parse_args
+from PytorchWildlife_Export.export_tool import (
+    main as export_tool_main,
+    parse_args as export_parse_args,
+)
 from PytorchWildlife_Export.inference_utils.onnx_inference import preprocess_image
 from PytorchWildlife_Export.postprocessors.yolov_postprocessor import YOLOvPostProcessor
 
@@ -89,21 +92,31 @@ def run_demo():
     print("\n--- Step 1: Export YOLOv10 (v9 Compatible Output) Model ---")
 
     # Export the YOLOv10 model with v9 compatible output
-    export_args = export_parse_args([
-        "--model_type", "yolov10_v9_compatible",
-        "--model_version", YOLOV10_COMPATIBLE_VERSION,
-        "--output_path", YOLOV10_COMPATIBLE_ONNX_PATH,
-        "--format", "int8",
-        # "--format", "float32",
-        # "--format", "float16",
-        "--opset", "18",
-        "--runtime", "tensorrt",
-        "--simplify",
-        "--input_img_size", "640",
-        # "--nhwc_input",
-        # "--denormalized_input",
-        # "--uint8_input",
-    ])
+    export_args = export_parse_args(
+        [
+            "--model_type",
+            # "yolov10_v9_compatible",
+            "yolov10",
+            "--model_version",
+            YOLOV10_COMPATIBLE_VERSION,
+            "--output_path",
+            YOLOV10_COMPATIBLE_ONNX_PATH,
+            "--format",
+            # "int8",
+            # "--format", "float32",
+            "float16",
+            "--opset",
+            "18",
+            "--runtime",
+            "tensorrt",
+            "--simplify",
+            "--input_img_size",
+            "640",
+            "--nhwc_input",
+            "--denormalized_input",
+            "--uint8_input",
+        ]
+    )
     export_tool_main(export_args)
 
     print("\n--- Step 2: Inference Validation (TensorRT engine) ---")
@@ -211,7 +224,9 @@ def run_demo():
     p99_ms = sorted(latencies_ms)[int(len(latencies_ms) * 0.99) - 1]
     fps = 1000.0 / avg_ms
 
-    print(f"Benchmark results over {TIMED_STEPS} timed steps (after {WARMUP_STEPS} warmup):")
+    print(
+        f"Benchmark results over {TIMED_STEPS} timed steps (after {WARMUP_STEPS} warmup):"
+    )
     print(f"  Avg latency : {avg_ms:.2f} ms")
     print(f"  P50 latency : {p50_ms:.2f} ms")
     print(f"  P99 latency : {p99_ms:.2f} ms")
