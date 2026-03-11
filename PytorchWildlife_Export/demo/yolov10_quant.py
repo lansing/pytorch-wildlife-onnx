@@ -1,10 +1,11 @@
-import argparse
 import os
+import statistics
 import sys
+import time
 from typing import Dict, List
 
-import cv2
 import numpy as np
+import torch
 from PIL import Image, ImageDraw, ImageFont
 
 # Add the project's top-level directory to the Python path
@@ -13,13 +14,19 @@ if project_top_level not in sys.path:
     sys.path.insert(0, project_top_level)
 
 # Import necessary components
-from PytorchWildlife_Export.export_tool import main as export_tool_main
-from PytorchWildlife_Export.export_tool import parse_args as export_parse_args
-from PytorchWildlife_Export.inference_utils.onnx_inference import ONNXInferenceSession
-from PytorchWildlife_Export.postprocessors.ultralytics_baseline_utils import (
-    get_ultralytics_baseline_detections,
+from PytorchWildlife_Export.export_tool import (
+    main as export_tool_main,
 )
-from PytorchWildlife_Export.postprocessors.yolov_postprocessor import YOLOvPostProcessor
+from PytorchWildlife_Export.export_tool import (
+    parse_args as export_parse_args,
+)
+from PytorchWildlife_Export.inference_utils.onnx_inference import (
+    ONNXInferenceSession,
+    preprocess_image,
+)
+from PytorchWildlife_Export.postprocessors.yolov10_postprocessor import (
+    YOLOv10PostProcessor,
+)
 
 # --- Configuration ---
 SAMPLE_IMAGE_PATH = os.path.abspath(
@@ -35,15 +42,7 @@ GLOBAL_CLASS_NAMES = {0: "animal", 1: "person", 2: "vehicle"}
 # Model parameters for YOLOv10 compatible export
 YOLOV10_COMPATIBLE_VERSION = "MDV6-yolov10-c"
 YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
-    OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_demo_export.onnx"
-)
-# YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
-#     "exported_models/MDV6-yolov10-c_float16_320_v9_compat_denorm_nhwc.onnx"
-# )
-
-
-YOLOV10_ORIGINAL_ONNX_PATH = os.path.join(
-    OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_320_raw.onnx"
+    OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_quant_demo.onnx"
 )
 
 
@@ -97,39 +96,50 @@ def run_demo():
     print("\n--- Step 1: Export YOLOv10 (v9 Compatible Output) Model ---")
 
     # Export the YOLOv10 model with v9 compatible output
-    export_tool_main(
-        export_parse_args(
-            [
-                "--model_type",
-                "yolov10_v9_compatible",
-                "--model_version",
-                YOLOV10_COMPATIBLE_VERSION,
-                "--output_path",
-                YOLOV10_COMPATIBLE_ONNX_PATH,
-                # "--format", "int8",
-                "--format",
-                "float32",
-                # "--format", "float16",
-                "--opset",
-                "18",
-                "--simplify",
-                "--input_img_size",
-                "320",
-                # "--nhwc_input",
-                # "--denormalized_input",
-                # "--uint8_input",
-            ]
-        )
+    export_args = export_parse_args(
+        [
+            "--model_type",
+            "yolov10",
+            "--model_version",
+            YOLOV10_COMPATIBLE_VERSION,
+            "--output_path",
+            YOLOV10_COMPATIBLE_ONNX_PATH,
+            "--format",
+            # "int8",
+            # "--format", "float32",
+            "float16",
+            "--opset",
+            "18",
+            "--runtime",
+            "onnx",
+            "--simplify",
+            "--input_img_size",
+            "320",
+            # "--nhwc_input",
+            # "--denormalized_input",
+            # "--uint8_input",
+        ]
     )
 
+    # IMPORTANT: run this before any ultralytics or tensorrt stuff if you want to use cuda. otherw is
+    if torch.cuda.is_available():
+        torch.zeros(1).cuda()
+        print(f"CUDA context initialized on device: {torch.cuda.get_device_name(0)}")
+    else:
+        print("No CUDA device found; ORT will run on CPU.")
+
+    export_tool_main(export_args)
+
     print("\n--- Step 2: Run Inference on the YOLOv10 (v9 Compatible) Model ---")
+
+    custom_post_processor = YOLOv10PostProcessor()  # Use YOLOv10 post-processor
     inference_session = ONNXInferenceSession(
         onnx_model_path=YOLOV10_COMPATIBLE_ONNX_PATH,
         # normalize=False,  # TODO for now, we are testing non-normalized float
+        preferred_provider="CUDAExecutionProvider",
     )
-    custom_post_processor = YOLOvPostProcessor()  # Use YOLOv9 post-processor
-
-    custom_detections = inference_session.run_inference(
+    print("Entering run_inference")
+    detections = inference_session.run_inference(
         image_path=SAMPLE_IMAGE_PATH,
         post_processor=custom_post_processor,
         confidence_threshold=CONFIDENCE_THRESHOLD,
@@ -137,21 +147,23 @@ def run_demo():
         class_names=GLOBAL_CLASS_NAMES,
     )
 
-    output_image_custom_path = os.path.join(
-        OUTPUT_DIR,
-        f"detected_sample_image_{YOLOV10_COMPATIBLE_VERSION}_v9_compatible_custom_pp.jpg",
-    )
-    print(f"Custom Post-Processor found {len(custom_detections)} detections.")
-    for det in custom_detections:
+    print(f"inference found {len(detections)} detections.")
+    for det in detections:
         print(
-            f"  Custom - Class: {det['class_name']} ({det['class_id']}), Confidence: {det['confidence']:.2f}, Box: {det['box']}"
+            f"  Class: {det['class_name']} ({det['class_id']}), "
+            f"Confidence: {det['confidence']:.2f}, Box: {det['box']}"
         )
+
+    output_image_path = os.path.join(
+        OUTPUT_DIR,
+        f"detected_sample_image_{YOLOV10_COMPATIBLE_VERSION}_trt.jpg",
+    )
     visualize_detections(
         SAMPLE_IMAGE_PATH,
-        custom_detections,
-        output_image_custom_path,
+        detections,
+        output_image_path,
         GLOBAL_CLASS_NAMES,
-        title=f"V10 Custom PP",
+        title=f"TRT: {YOLOV10_COMPATIBLE_VERSION}",
     )
 
 

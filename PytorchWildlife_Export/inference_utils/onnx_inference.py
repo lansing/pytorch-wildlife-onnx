@@ -29,7 +29,9 @@ def preprocess_image(
     tensor_format: str = "nchw",
     normalize: bool = True,
     uint8_input: bool = False,
-) -> Tuple[np.ndarray, Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]]:
+) -> Tuple[
+    np.ndarray, Tuple[int, int], Tuple[Tuple[float, float], Tuple[float, float]]
+]:
     """
     Preprocess a single image into the tensor format expected by the model.
 
@@ -71,8 +73,13 @@ def preprocess_image(
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     padded = cv2.copyMakeBorder(
-        img_resized, top, bottom, left, right,
-        cv2.BORDER_CONSTANT, value=(114, 114, 114),
+        img_resized,
+        top,
+        bottom,
+        left,
+        right,
+        cv2.BORDER_CONSTANT,
+        value=(114, 114, 114),
     )
 
     ratio_pad = ((r, r), (left, top))
@@ -98,7 +105,7 @@ class ONNXInferenceSession:
     provided PostProcessor instance.
     """
 
-    def __init__(self, onnx_model_path: str, normalize: bool = True):
+    def __init__(self, onnx_model_path: str, normalize: bool = True, preferred_provider: Optional[str] = None):
         self.onnx_model_path = onnx_model_path
         self.session: Optional[ort.InferenceSession] = None
         self.input_name: Optional[str] = None
@@ -106,16 +113,27 @@ class ONNXInferenceSession:
         self.input_type: Optional[str] = None
         self.output_name: Optional[str] = None
         self.normalize = normalize
+        self.preferred_provider = preferred_provider
 
+        print("b4 load_model")
         self._load_model()
+        print("after load_model")
 
     def _load_model(self):
         """Loads the ONNX model using onnxruntime."""
+        available = ort.get_available_providers()
+        if self.preferred_provider is not None and self.preferred_provider in available:
+            idx = available.index(self.preferred_provider)
+            providers = available[idx:]
+        else:
+            providers = available
+        print(f"ORT providers: {providers}")
+
         options = ort.SessionOptions()
         options.enable_profiling = True
         self.session = ort.InferenceSession(
             self.onnx_model_path,
-            providers=ort.get_available_providers(),
+            providers=providers,
             sess_options=options,
         )
 
