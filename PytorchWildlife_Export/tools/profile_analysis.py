@@ -53,11 +53,18 @@ def _is_memcpy(op_name: str) -> bool:
     return "memcpy" in op_name.lower()
 
 
+def _is_trt_kernel(op_name: str) -> bool:
+    """TRT EP compiles the whole (sub)graph into a single fused engine call."""
+    return op_name.startswith("TRTKernel")
+
+
 def _quant_class(event: dict, op_name: str) -> str:
     if _is_memcpy(op_name):
         return "MemcpyHost↔Device"
     if _is_qdq_overhead(op_name):
         return "Q/DQ overhead"
+    if _is_trt_kernel(op_name):
+        return "TRT-fused subgraph"
     if _is_int8_kernel(event):
         return "INT8 kernel"
     return "Float kernel"
@@ -207,6 +214,7 @@ def print_report(path: str, events: list, result: dict, top_n: int, min_pct: flo
     total_ms = total_us / 1000.0
     by_quant = result["by_quant"]
     n_int8 = by_quant.get("INT8 kernel", {}).get("count", 0)
+    n_trt = by_quant.get("TRT-fused subgraph", {}).get("count", 0)
     n_qdq = by_quant.get("Q/DQ overhead", {}).get("count", 0)
     n_memcpy = by_quant.get("MemcpyHost↔Device", {}).get("count", 0)
 
@@ -214,10 +222,15 @@ def print_report(path: str, events: list, result: dict, top_n: int, min_pct: flo
     print("=" * W)
     print(f"  ORT Profile Analysis: {Path(path).name}")
     print(f"  Events analysed : {len(events):,}   |   Total kernel time: {total_ms:.2f} ms")
-    print(f"  INT8 fused kernels: {n_int8}   |   Q/DQ nodes: {n_qdq}   |   MemcpyFromHost: {n_memcpy}")
+    print(f"  TRT subgraphs: {n_trt}   |   INT8 kernels: {n_int8}   |   "
+          f"Q/DQ nodes: {n_qdq}   |   MemcpyFromHost: {n_memcpy}")
 
-    # Prominent warning if QDQ nodes present but no INT8 kernels (common misconfiguration)
-    if n_qdq > 0 and n_int8 == 0:
+    if n_trt > 0:
+        pct_trt = _pct(by_quant["TRT-fused subgraph"]["total_us"], total_us)
+        print(f"  ✓  {pct_trt:.1f}% of kernel time runs inside TRT-compiled engine(s).")
+        print(f"     Internal layer precision is not visible in ORT profiling.")
+        print(f"     Re-run with trt_profile_verbosity=verbose for per-layer TRT timing.")
+    elif n_qdq > 0 and n_int8 == 0:
         print()
         print("  ⚠  QDQ NODES PRESENT BUT NO INT8 KERNELS FUSED.")
         print("     ORT CUDA EP is not fusing QDQ→Conv into INT8 kernels.")
@@ -262,7 +275,7 @@ def print_report(path: str, events: list, result: dict, top_n: int, min_pct: flo
     print(f"\n── By Quantization Mode " + "─" * (W - 24))
     print(f"  {'Mode':<24} {'Count':>7}  {'Total (ms)':>12}  {'%':>6}")
     print(f"  {sep}")
-    order = ["INT8 kernel", "Float kernel", "Q/DQ overhead", "MemcpyHost↔Device"]
+    order = ["TRT-fused subgraph", "INT8 kernel", "Float kernel", "Q/DQ overhead", "MemcpyHost↔Device"]
     for cls in order + [k for k in by_quant if k not in order]:
         if cls not in by_quant:
             continue
@@ -298,7 +311,9 @@ def print_report(path: str, events: list, result: dict, top_n: int, min_pct: flo
         pct = _pct(tot_us, total_us)
         avg_us = tot_us / count if count else 0
         short_prov = PROV_SHORT.get(prov, prov[:4])
-        if qcls == "INT8 kernel":
+        if qcls == "TRT-fused subgraph":
+            mode_flag = "TRT"
+        elif qcls == "INT8 kernel":
             mode_flag = "INT8"
         elif _is_qdq_overhead(op):
             mode_flag = "QDQ"

@@ -105,7 +105,13 @@ class ONNXInferenceSession:
     provided PostProcessor instance.
     """
 
-    def __init__(self, onnx_model_path: str, normalize: bool = True, preferred_provider: Optional[str] = None):
+    def __init__(
+        self,
+        onnx_model_path: str,
+        normalize: bool = True,
+        preferred_provider: Optional[str] = None,
+        provider_options: Optional[Dict[str, Dict]] = None,
+    ):
         self.onnx_model_path = onnx_model_path
         self.session: Optional[ort.InferenceSession] = None
         self.input_name: Optional[str] = None
@@ -114,6 +120,7 @@ class ONNXInferenceSession:
         self.output_name: Optional[str] = None
         self.normalize = normalize
         self.preferred_provider = preferred_provider
+        self.provider_options = provider_options or {}
 
         print("b4 load_model")
         self._load_model()
@@ -124,10 +131,16 @@ class ONNXInferenceSession:
         available = ort.get_available_providers()
         if self.preferred_provider is not None and self.preferred_provider in available:
             idx = available.index(self.preferred_provider)
-            providers = available[idx:]
+            provider_names = available[idx:]
         else:
-            providers = available
-        print(f"ORT providers: {providers}")
+            provider_names = available
+
+        # Build provider list: wrap with options dict where provided
+        providers = [
+            (name, self.provider_options[name]) if name in self.provider_options else name
+            for name in provider_names
+        ]
+        print(f"ORT providers: {provider_names}")
 
         options = ort.SessionOptions()
         options.enable_profiling = True

@@ -435,9 +435,11 @@ def wrap_node_in_int8_qdq(
             ))
             LOGGER.debug(f"  Weight pre-quantised to INT8, scale={w_scale:.6f}")
 
-            new_op_inputs = [inp_x_dq, w_dq_out]
-            if inp_b:
-                new_op_inputs.append(inp_b)   # bias stays float32
+            # Bias is intentionally excluded from the Conv node and added as a
+            # float32 Add node *after* the output DQ. This prevents TRT 10.x's
+            # ONNX parser from trying to create an INT32 bias DQ node (which
+            # TRT 10.x's own type checker rejects: DQ requires Int8 input, not Int32).
+            new_op_inputs = [inp_x_dq, w_dq_out]  # no bias here
 
         elif node.op_type == "MatMul":
             # MatMul inputs: [A, B] — both are dynamic activations in the attention block
@@ -486,12 +488,35 @@ def wrap_node_in_int8_qdq(
             outputs=[q_out],
             name=node.output[0] + "__out_QuantizeLinear",
         ))
+        # When there is a Conv bias to add back, the DQ writes to an intermediate
+        # name and the Add node restores the original output name. Without bias,
+        # the DQ writes directly to the original output name.
+        conv_bias = inp_b if node.op_type == "Conv" else ""
+        dq_out_name = (node.output[0] + "__no_bias") if conv_bias else node.output[0]
         new_nodes.append(oh.make_node(
             "DequantizeLinear",
             inputs=[q_out, out_scale_name, zp_name],
-            outputs=[node.output[0]],   # restore original output name
+            outputs=[dq_out_name],
             name=node.output[0] + "__out_DequantizeLinear",
         ))
+        if conv_bias:
+            # Bias shape is [C]; reshape to [1, C, 1, 1] so it broadcasts
+            # correctly over [N, C, H, W] Conv output (ONNX right-aligns dims).
+            if conv_bias in init_map:
+                bias_arr = onh.to_array(init_map[conv_bias]).astype(np.float32)
+                bias_4d = bias_arr.reshape(1, bias_arr.shape[0], 1, 1)
+                bias_4d_name = target_node_name + "__bias_4d"
+                new_inits.append(onh.from_array(bias_4d, name=bias_4d_name))
+                bias_add_input = bias_4d_name
+            else:
+                bias_add_input = conv_bias  # already shaped (e.g. runtime tensor)
+            new_nodes.append(oh.make_node(
+                "Add",
+                inputs=[dq_out_name, bias_add_input],
+                outputs=[node.output[0]],   # restore original output name
+                name=node.output[0] + "__bias_add",
+            ))
+            LOGGER.debug(f"  Bias '{conv_bias}' added as float32 Add node after output DQ")
         LOGGER.info(f"  INT8 QDQ pattern inserted around '{node.name}'")
 
     new_graph = oh.make_graph(

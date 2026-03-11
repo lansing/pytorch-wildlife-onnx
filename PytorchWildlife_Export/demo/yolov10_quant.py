@@ -49,7 +49,7 @@ IOU_THRESHOLD = 0.45
 GLOBAL_CLASS_NAMES = {0: "animal", 1: "person", 2: "vehicle"}
 
 # Model parameters for YOLOv10 compatible export
-YOLOV10_COMPATIBLE_VERSION = "MDV6-yolov10-c"
+YOLOV10_COMPATIBLE_VERSION = "MDV6-yolov10-e"
 YOLOV10_COMPATIBLE_ONNX_PATH = os.path.join(
     OUTPUT_DIR, f"{YOLOV10_COMPATIBLE_VERSION}_quant_demo.onnx"
 )
@@ -158,27 +158,43 @@ def run_demo():
         model = wrap_nodes_in_int8_qdq(
             base_model,
             calib_loader,
-            # node_types not set → no bulk type-based quantization
-            node_names=[
-                # Heaviest node from profile (~15% of total runtime)
-                "YOLO/model.23/one2one_cv3.2/one2one_cv3.2.0/one2one_cv3.2.0.0/conv/Conv",
+            node_types=["Conv"],
+            exclude=[
+                # Head nodes
+                "model.23",
             ],
         )
+        mixed_onnx_path = YOLOV10_COMPATIBLE_ONNX_PATH.replace(
+            ".onnx", "_mixed_int8.onnx"
+        )
     else:
+        print("SKIPPING QUANTIZATION. Just saving original full precision model.")
         model = base_model
+        mixed_onnx_path = YOLOV10_COMPATIBLE_ONNX_PATH
 
-    mixed_onnx_path = YOLOV10_COMPATIBLE_ONNX_PATH.replace(".onnx", "_mixed_int8.onnx")
     onnx.save(model, mixed_onnx_path)
-    print(f"INT8 QDQ model saved to: {mixed_onnx_path}")
+    print(f"Final model saved to: {mixed_onnx_path}")
 
     print("\n--- Step 2: Run Inference on the YOLOv10 (v9 Compatible) Model ---")
 
     custom_post_processor = YOLOv10PostProcessor()  # Use YOLOv10 post-processor
     inference_session = ONNXInferenceSession(
         onnx_model_path=mixed_onnx_path,
-        # normalize=False,  # TODO for now, we are testing non-normalized float
-        preferred_provider="CUDAExecutionProvider",
+        preferred_provider="TensorrtExecutionProvider",
+        provider_options={
+            "TensorrtExecutionProvider": {
+                # Explicit quantization: Q/DQ nodes carry calibrated scales.
+                # trt_int8_enable=False keeps STRONGLY_TYPED mode so TRT reads
+                # the embedded scale/zero-point rather than a calibration table.
+                "trt_int8_enable": False,
+                "trt_fp16_enable": False,
+                "trt_engine_cache_enable": True,
+                "trt_engine_cache_path": "/exported_models/trt_cache",
+                "trt_detailed_build_log": True,
+            },
+        },
     )
+    # ── Correctness check (single inference + visualisation) ──────────────
     print("Entering run_inference")
     detections = inference_session.run_inference(
         image_path=SAMPLE_IMAGE_PATH,
@@ -206,6 +222,29 @@ def run_demo():
         GLOBAL_CLASS_NAMES,
         title=f"TRT: {YOLOV10_COMPATIBLE_VERSION}",
     )
+
+    # ── Benchmark ──────────────────────────────────────────────────────────
+    print("\n--- Step 3: Benchmark ---")
+    bench = inference_session.benchmark(
+        image_path=SAMPLE_IMAGE_PATH,
+        warmup=100,
+        iterations=1000,
+    )
+    print(
+        f"\nLatency over {len(bench['latencies_ms'])} iterations "
+        f"(after {bench['warmup_runs']} warmup runs):"
+    )
+    print(f"  mean : {bench['mean_ms']:.2f} ms")
+    print(f"  p50  : {bench['p50_ms']:.2f} ms")
+    print(f"  p99  : {bench['p99_ms']:.2f} ms")
+    print(f"  min  : {bench['latencies_ms'][0]:.2f} ms")
+    print(f"  max  : {bench['latencies_ms'][-1]:.2f} ms")
+    print(f"Profile saved to: {bench['profile_path']}")
+    print(f"  Analyse with:")
+    print(f"    python3 PytorchWildlife_Export/tools/profile_analysis.py \\")
+    print(f"      {bench['profile_path']} \\")
+    print(f"      --warmup-runs {bench['warmup_runs']} \\")
+    print(f"      --total-runs {bench['total_runs']}")
 
 
 if __name__ == "__main__":
