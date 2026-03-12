@@ -9,6 +9,7 @@ headings:
   nhwc_input: "NHWC Input Layout"
   uint8_input: "uint8 Input"
   num_calibration_images: "INT8 Calibration Images"
+  quant_profile: "INT8 Quantization Profile"
   run_export: "Run Export"
 
 instructions:
@@ -39,6 +40,14 @@ instructions:
     Images are sourced from **lucabaggi/animal-wildlife** (90 wildlife species) and
     cached locally after the first run. 100 images is a good default; more images
     can marginally improve calibration accuracy.
+  quant_profile: |
+    Select which op types are wrapped in INT8 QDQ pairs.
+
+    **Conv** (default) — Conv layers only. Fastest on most tested hardware; TRT fuses INT8 Conv kernels very efficiently.
+
+    **Conv + SiLU** — also quantizes the SiLU activations (x · σ(x)) that follow each Conv. May improve throughput on GPUs with fast INT8 element-wise kernels.
+
+    **Blanket** — Conv + SiLU + Add + Concat + MaxPool. Maximises the size of contiguous INT8 subgraphs. Most beneficial on GPUs with wide INT8 tensor-core throughput (e.g. NVIDIA Hopper / Blackwell architecture).
   run_export: "Review the selected options below and proceed to run the export."
 
 options:
@@ -77,6 +86,13 @@ options:
       label: 'FP16 (float16)'
     - value: 'int8'
       label: 'INT8 (quantized)'
+  quant_profile:
+    - value: 'conv'
+      label: 'Conv — quantize Conv layers only (default, fastest on most hardware)'
+    - value: 'conv_silu'
+      label: 'Conv + SiLU — also quantize SiLU activations'
+    - value: 'blanket'
+      label: 'Blanket — Conv + SiLU + Add + Concat + MaxPool (best on Hopper/Blackwell)'
   denormalized_input:
     - value: False
       label: 'No  — exported model expects 0.0–1.0 input (default)'
@@ -104,6 +120,7 @@ defaults:
   nhwc_input: False
   uint8_input: False
   num_calibration_images: 100
+  quant_profile: 'conv'
 
 ranges:
   input_img_size:

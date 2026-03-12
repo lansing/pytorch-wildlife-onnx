@@ -160,8 +160,10 @@ def run_demo():
             calib_loader,
             node_types=["Conv"],
             exclude=[
-                # Head nodes
+                # Detection head — final class/box layers are very sensitive.
                 "model.23",
+                # PSA attention block — non-uniform distributions, exclude entirely.
+                "model.10",
             ],
         )
         mixed_onnx_path = YOLOV10_COMPATIBLE_ONNX_PATH.replace(

@@ -154,8 +154,9 @@ def run_demo():
             node_types=["Conv"],
             exclude=[
                 # Detection head — final class/box layers are very sensitive.
-                # Quantizing these collapses confidence scores.
                 "model.23",
+                # PSA attention block — non-uniform distributions, exclude entirely.
+                "model.10",
             ],
         )
         onnx.save(quant_model, QUANT_ONNX_PATH)

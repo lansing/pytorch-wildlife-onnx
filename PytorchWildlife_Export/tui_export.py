@@ -217,9 +217,13 @@ class SummaryScreen(Screen):
             preproc_parts.append("uint8 dtype")
         preproc_str = ", ".join(preproc_parts) if preproc_parts else "none"
 
-        is_int8_trt = (
-            selections.get("runtime") == "tensorrt"
-            and selections.get("format") == "int8"
+        is_int8 = selections.get("format") == "int8"
+        is_int8_trt = is_int8 and selections.get("runtime") == "tensorrt"
+
+        quant_profile_line = (
+            f"\n- **Quant Profile**: `{selections.get('quant_profile', 'conv')}`"
+            if is_int8
+            else ""
         )
         calib_line = (
             f"\n- **Calibration Images**: `{selections['num_calibration_images']}`"
@@ -233,7 +237,7 @@ class SummaryScreen(Screen):
 - **Runtime**: `{selections["runtime"]}`
 - **Output Directory**: `{selections["output_dir"]}`
 - **Output Path**: `{output_path}`
-- **Format**: `{selections["format"]}`
+- **Format**: `{selections["format"]}`{quant_profile_line}
 - **Input Image Size**: `{selections["input_img_size"]}`
 - **Input Preprocessing**: `{preproc_str}`{calib_line}
 """
@@ -344,13 +348,18 @@ class ExecutionScreen(Screen):
             cmd.append("--nhwc_input")
         if selections.get("uint8_input"):
             cmd.append("--uint8_input")
+        if selections.get("format") == "int8":
+            cmd += [
+                "--quant_profile",
+                selections.get("quant_profile", "conv"),
+            ]
         if (
             selections.get("runtime") == "tensorrt"
             and selections.get("format") == "int8"
         ):
             cmd += [
                 "--num_calibration_images",
-                str(selections.get("num_calibration_images", 300)),
+                str(selections.get("num_calibration_images", 100)),
             ]
         return cmd
 
@@ -395,10 +404,12 @@ class ExportTUI(App):
         return ChoiceSelectionScreen("format", self.get_post_format_screen)
 
     def get_post_format_screen(self):
-        if (
-            self.selections.get("runtime") == "tensorrt"
-            and self.selections.get("format") == "int8"
-        ):
+        if self.selections.get("format") == "int8":
+            return ChoiceSelectionScreen("quant_profile", self.get_post_quant_profile_screen)
+        return self.get_input_img_size_screen()
+
+    def get_post_quant_profile_screen(self):
+        if self.selections.get("runtime") == "tensorrt":
             return InputScreen("num_calibration_images", self.get_input_img_size_screen)
         return self.get_input_img_size_screen()
 

@@ -45,6 +45,28 @@ def _find_silu_muls(model: onnx.ModelProto) -> dict:
     return result
 
 
+def _get_node_input_tensors_for_calibration(
+    node, silu_map: dict, init_names: set
+) -> list:
+    """
+    Returns the ordered list of input tensor names that need calibration for a node.
+
+    Initializers (weights / biases) are skipped — they are not runtime activations.
+    For SiLU Mul nodes the sigmoid(x) input is skipped because it lives in (0, 1)
+    and must stay float32.
+    """
+    if node.op_type == "Conv":
+        return [node.input[0]]  # X only; W and B are initializers
+    elif node.op_type == "MatMul":
+        return [inp for inp in node.input if inp not in init_names]
+    elif node.op_type == "Mul" and node.name in silu_map:
+        return [silu_map[node.name]]  # x only, not sigmoid(x)
+    elif node.op_type in ("Add", "Concat", "MaxPool"):
+        return [inp for inp in node.input if inp not in init_names]
+    else:
+        return [node.input[0]]
+
+
 def _make_scalar_init(name: str, value, dtype) -> onnx.TensorProto:
     """Create a scalar (shape=[]) initializer."""
     arr = np.array(value, dtype=dtype)
@@ -335,36 +357,38 @@ def calibrate_node_scales(
 def wrap_node_in_int8_qdq(
     model: onnx.ModelProto,
     target_node_name: str,
-    activation_scale: float = 1.0 / 127.0,
+    input_scales: list = None,
     output_scale: float = 1.0 / 127.0,
 ) -> onnx.ModelProto:
     """
-    Wraps a single Conv node in INT8 QuantizeLinear / DequantizeLinear (QDQ)
-    pairs, following the ONNX QDQ format that ORT fuses into an INT8 kernel.
+    Wraps a single node in INT8 QuantizeLinear / DequantizeLinear (QDQ) pairs.
 
-    Pattern inserted around the node:
+    Supported op types: Conv, MatMul, Mul (SiLU), Add, Concat, MaxPool.
 
-        float_input  →  Q(scale_act, zp=0)  →  int8  →  DQ  →  float  ┐
-        weight_init  →  [pre-quantised INT8 stored]  →  DQ             ├→ Conv → Q → DQ → float_output
-        bias_init    →  (kept as float32, passed through unchanged)     ┘
+    ``input_scales`` is an ordered list of calibrated scales, one per dynamic
+    activation input (initializers and the sigmoid(x) branch of SiLU are not
+    counted).  Defaults to ``[1/127]`` when not supplied.
 
-    Weight scales are computed from the actual weight tensor values using
-    symmetric per-tensor quantisation: scale = max(abs(W)) / 127.
-    Activation and output scales are caller-supplied (require calibration for
-    accuracy; the defaults are a stand-in for proof-of-concept runs).
+    Weight scales for Conv are computed from the stored initializer values
+    using symmetric per-tensor quantisation: scale = max(abs(W)) / 127.
+    Conv bias is kept at float32 and added back *after* the output DQ node
+    to avoid TRT 10.x rejecting an INT32 DequantizeLinear input.
 
     Args:
         model: A loaded float32 ONNX ModelProto.
-        target_node_name: The ``name`` field of the Conv node to quantise.
-        activation_scale: Scale for the input activation tensor.
-        output_scale: Scale for the Conv output tensor.
+        target_node_name: The ``name`` field of the node to quantise.
+        input_scales: Calibrated activation scales (one per dynamic input).
+        output_scale: Scale for the node output tensor.
 
     Returns:
-        A new ModelProto with QDQ nodes inserted around the target Conv.
+        A new ModelProto with QDQ nodes inserted around the target node.
 
     Raises:
-        ValueError: If the node is not found or is not a Conv node.
+        ValueError: If the node is not found or its op type is unsupported.
     """
+    if input_scales is None:
+        input_scales = [1.0 / 127.0]
+
     graph = model.graph
 
     node_map = {n.name: n for n in graph.node}
@@ -373,9 +397,11 @@ def wrap_node_in_int8_qdq(
             f"Node '{target_node_name}' not found in graph."
         )
     target = node_map[target_node_name]
-    if target.op_type not in ("Conv", "MatMul", "Mul"):
+    _SUPPORTED = ("Conv", "MatMul", "Mul", "Add", "Concat", "MaxPool")
+    if target.op_type not in _SUPPORTED:
         raise ValueError(
-            f"Node '{target_node_name}' is a {target.op_type}, not a Conv, MatMul, or Mul."
+            f"Node '{target_node_name}' is a {target.op_type}, "
+            f"which is not in the supported set {_SUPPORTED}."
         )
 
     init_map = {init.name: init for init in graph.initializer}
@@ -386,10 +412,6 @@ def wrap_node_in_int8_qdq(
     # ── shared zero-point scalar (int8, value=0) ──────────────────────────
     zp_name = target_node_name + "__zp_int8"
     new_inits.append(_make_scalar_init(zp_name, 0, np.int8))
-
-    # ── activation scale ──────────────────────────────────────────────────
-    act_scale_name = target_node_name + "__act_scale"
-    new_inits.append(_make_scalar_init(act_scale_name, np.float32(activation_scale), np.float32))
 
     # ── output scale ──────────────────────────────────────────────────────
     out_scale_name = target_node_name + "__out_scale"
@@ -408,9 +430,9 @@ def wrap_node_in_int8_qdq(
             inp_w = node.input[1]   # weight initializer
             inp_b = node.input[2] if len(node.input) > 2 else ""  # bias (optional)
 
-            # ── quantise activation: float → Q → DQ → float ──────────────────
-            # node_prefix scopes intermediate names to this node so that a shared
-            # activation tensor (fan-out) doesn't collide across multiple wraps.
+            # ── quantise activation ───────────────────────────────────────────
+            act_scale_name = target_node_name + "__act_scale"
+            new_inits.append(_make_scalar_init(act_scale_name, np.float32(input_scales[0]), np.float32))
             inp_x_dq = _qdq_pair(inp_x, act_scale_name, zp_name, new_nodes,
                                   node_prefix=target_node_name)
             LOGGER.debug(f"  Activation Q/DQ inserted for '{inp_x}'")
@@ -446,18 +468,25 @@ def wrap_node_in_int8_qdq(
             inp_a = node.input[0]
             inp_b = node.input[1]
 
-            inp_a_dq = _qdq_pair(inp_a, act_scale_name, zp_name, new_nodes,
+            act_scale_a = target_node_name + "__act_scale_A"
+            act_scale_b = target_node_name + "__act_scale_B"
+            new_inits.append(_make_scalar_init(act_scale_a, np.float32(input_scales[0]), np.float32))
+            new_inits.append(_make_scalar_init(act_scale_b, np.float32(
+                input_scales[1] if len(input_scales) > 1 else input_scales[0]), np.float32))
+
+            inp_a_dq = _qdq_pair(inp_a, act_scale_a, zp_name, new_nodes,
                                   node_prefix=target_node_name + "__A")
-            inp_b_dq = _qdq_pair(inp_b, act_scale_name, zp_name, new_nodes,
+            inp_b_dq = _qdq_pair(inp_b, act_scale_b, zp_name, new_nodes,
                                   node_prefix=target_node_name + "__B")
             LOGGER.debug(f"  MatMul activation Q/DQ inserted for '{inp_a}' and '{inp_b}'")
 
             new_op_inputs = [inp_a_dq, inp_b_dq]
 
-        else:
-            # Mul (SiLU): x * sigmoid(x).
+        elif node.op_type == "Mul":
+            # SiLU: x * sigmoid(x).
             # Only quantize x — sigmoid(x) is in (0, 1) and must stay float32.
-            # Detect which input is x (not produced by a Sigmoid of the other input).
+            act_scale_name = target_node_name + "__act_scale"
+            new_inits.append(_make_scalar_init(act_scale_name, np.float32(input_scales[0]), np.float32))
             output_producer = {out: n for n in graph.node for out in n.output}
             new_op_inputs = []
             for inp in node.input:
@@ -469,6 +498,26 @@ def wrap_node_in_int8_qdq(
                                    node_prefix=target_node_name)
                     new_op_inputs.append(dq)    # x — quantized
             LOGGER.debug(f"  SiLU Mul: x quantized, sigmoid(x) kept float32")
+
+        elif node.op_type in ("Add", "Concat"):
+            # All inputs are dynamic activations; each gets its own scale.
+            new_op_inputs = []
+            for i, inp in enumerate(node.input):
+                scale_i = input_scales[i] if i < len(input_scales) else input_scales[-1]
+                in_scale_name = f"{target_node_name}__in{i}_scale"
+                new_inits.append(_make_scalar_init(in_scale_name, np.float32(scale_i), np.float32))
+                dq = _qdq_pair(inp, in_scale_name, zp_name, new_nodes,
+                               node_prefix=f"{target_node_name}__in{i}")
+                new_op_inputs.append(dq)
+            LOGGER.debug(f"  {node.op_type}: {len(node.input)} input(s) quantized")
+
+        else:  # MaxPool
+            act_scale_name = target_node_name + "__act_scale"
+            new_inits.append(_make_scalar_init(act_scale_name, np.float32(input_scales[0]), np.float32))
+            inp_dq = _qdq_pair(node.input[0], act_scale_name, zp_name, new_nodes,
+                               node_prefix=target_node_name)
+            new_op_inputs = [inp_dq]
+            LOGGER.debug(f"  MaxPool input Q/DQ inserted")
 
         # ── op node (unchanged op, rewired inputs) ─────────────────────────
         new_op = oh.make_node(
@@ -538,46 +587,53 @@ def calibrate_conv_nodes_scales(
     model: onnx.ModelProto,
     target_node_names: list,
     calibration_loader,
-    act_in_overrides: dict = None,
+    silu_map: dict = None,
 ) -> dict:
     """
-    Single-pass calibration for multiple nodes (Conv, MatMul, SiLU Mul, …).
+    Single-pass calibration for multiple nodes (Conv, MatMul, SiLU Mul,
+    Add, Concat, MaxPool, …).
 
-    Exposes every target node's activation input and output as extra graph
-    outputs, runs all calibration images through ORT once, and returns a dict
-    mapping node name → (activation_scale, output_scale).
+    Exposes every target node's dynamic activation inputs and output as extra
+    graph outputs, runs all calibration images through ORT once, and returns a
+    dict mapping node name → ([input_scale, ...], output_scale).
+
+    The number of input scales equals the number of dynamic activation inputs
+    for that node (determined by ``_get_node_input_tensors_for_calibration``):
+    Conv and MaxPool → 1, MatMul and Add → 2, Concat → N inputs.
 
     Args:
         model: The base float32 ONNX ModelProto.
         target_node_names: Ordered list of node names to calibrate.
         calibration_loader: A TRTCalibrationDataLoader instance.
-        act_in_overrides: Optional dict mapping node_name → activation_input_tensor_name.
-            Used for SiLU Mul nodes where input[0] may be sigmoid(x) rather than x.
+        silu_map: Optional dict ``{mul_node_name: x_tensor_name}`` from
+            ``_find_silu_muls``.  Used to identify the correct x input for
+            SiLU Mul nodes.  Computed internally if not supplied.
 
     Returns:
-        {node_name: (activation_scale, output_scale)}
+        {node_name: ([input_scale_0, ...], output_scale)}
     """
     import os
     import tempfile
 
     import onnxruntime as ort
 
-    if act_in_overrides is None:
-        act_in_overrides = {}
+    if silu_map is None:
+        silu_map = _find_silu_muls(model)
 
+    init_names = {init.name for init in model.graph.initializer}
     node_map = {n.name: n for n in model.graph.node}
     existing_out_names = {o.name for o in model.graph.output}
 
-    # Collect the tensor names we need to observe
-    observe: dict = {}  # node_name → (act_input_name, act_output_name)
+    # observe: node_name → (list_of_input_tensor_names, output_tensor_name)
+    observe: dict = {}
     extra_outputs = []
     seen_tensors: set = set()
     for name in target_node_names:
         node = node_map[name]
-        act_in = act_in_overrides.get(name, node.input[0])
+        input_tensors = _get_node_input_tensors_for_calibration(node, silu_map, init_names)
         act_out = node.output[0]
-        observe[name] = (act_in, act_out)
-        for t in (act_in, act_out):
+        observe[name] = (input_tensors, act_out)
+        for t in input_tensors + [act_out]:
             if t not in existing_out_names and t not in seen_tensors:
                 extra_outputs.append(
                     oh.make_tensor_value_info(t, TensorProto.FLOAT, None)
@@ -606,7 +662,7 @@ def calibrate_conv_nodes_scales(
         os.unlink(tmp_path)
 
     ort_input_name = session.get_inputs()[0].name
-    fetch_names = [t for t in seen_tensors]  # order matches extra_outputs
+    fetch_names = list(seen_tensors)
     num_images = calibration_loader.num_images
     print(
         f"Calibrating {len(target_node_names)} nodes "
@@ -627,11 +683,13 @@ def calibrate_conv_nodes_scales(
             print(f"  [{n}/{num_images}] calibration images processed")
 
     scales = {}
-    for node_name, (act_in, act_out) in observe.items():
-        act_scale = running_max[act_in] / 127.0
+    for node_name, (input_tensors, act_out) in observe.items():
+        in_scales = [running_max[t] / 127.0 for t in input_tensors]
         out_scale = running_max[act_out] / 127.0
-        scales[node_name] = (act_scale, out_scale)
-        LOGGER.debug(f"  {node_name}: act={act_scale:.6f}, out={out_scale:.6f}")
+        scales[node_name] = (in_scales, out_scale)
+        LOGGER.debug(
+            f"  {node_name}: in_scales={[f'{s:.6f}' for s in in_scales]}, out={out_scale:.6f}"
+        )
 
     print(f"Calibration complete for {len(scales)} nodes.")
     return scales
@@ -686,7 +744,6 @@ def wrap_nodes_in_int8_qdq(
     silu_map = _find_silu_muls(model)  # {mul_node_name: x_tensor_name}
 
     targets = []
-    act_in_overrides: dict = {}   # node_name → activation input tensor for calibration
     for op_type in node_types:
         # "SiLU" is a pseudo-type: match Mul nodes that implement SiLU(x) = x * sigmoid(x)
         if op_type == "SiLU":
@@ -713,10 +770,6 @@ def wrap_nodes_in_int8_qdq(
             for n in cap_excluded:
                 print(f"      {n.name}")
         targets.extend(selected)
-        # For SiLU nodes, calibration must observe x (not sigmoid(x) = input[0])
-        if op_type == "SiLU":
-            for n in selected:
-                act_in_overrides[n.name] = silu_map[n.name]
 
     # Resolve explicitly named nodes and append (deduplicating against type-selected set)
     if node_names:
@@ -739,15 +792,15 @@ def wrap_nodes_in_int8_qdq(
     print(f"Total nodes to quantize: {len(target_names)}")
 
     scales = calibrate_conv_nodes_scales(
-        model, target_names, calibration_loader, act_in_overrides=act_in_overrides
+        model, target_names, calibration_loader, silu_map=silu_map
     )
 
     result = model
     for node_name in target_names:
-        act_scale, out_scale = scales[node_name]
+        in_scales, out_scale = scales[node_name]
         result = wrap_node_in_int8_qdq(
             result, node_name,
-            activation_scale=act_scale,
+            input_scales=in_scales,
             output_scale=out_scale,
         )
 

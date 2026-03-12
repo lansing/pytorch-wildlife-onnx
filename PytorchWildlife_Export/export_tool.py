@@ -106,6 +106,20 @@ def parse_args(argv=None):
             "quantization. Only used when --format int8. Default is 100."
         ),
     )
+    parser.add_argument(
+        "--quant_profile",
+        type=str,
+        default="conv",
+        choices=["conv", "conv_silu", "blanket"],
+        help=(
+            "INT8 quantization profile. Controls which op types are wrapped in "
+            "QDQ pairs. 'conv' (default): Conv only — fastest on most hardware. "
+            "'conv_silu': Conv + SiLU activations. "
+            "'blanket': Conv + SiLU + Add + Concat + MaxPool — maximises INT8 "
+            "subgraph size; may help on GPUs with wide INT8 tensor-core throughput. "
+            "Only used when --format int8."
+        ),
+    )
 
     return parser.parse_args(argv)
 
@@ -173,6 +187,7 @@ def main(args=None):
         runtime=args.runtime,
         num_calibration_images=args.num_calibration_images,
         model_type=args.model_type,
+        quant_profile=args.quant_profile,
     )
 
     if args.model_type in ("yolov9", "yolov10"):

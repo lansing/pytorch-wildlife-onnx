@@ -26,12 +26,32 @@ LOGGER = logging.getLogger(__name__)
 # Add new entries when INT8 exclusion rules have been characterised for a
 # new model family.  Raise NotImplementedError for uncharacterised families.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# INT8 quantization profiles — node types to wrap in QDQ pairs.
+#
+# "conv"      — Conv only.  Fastest on most hardware tested so far;
+#               TRT fuses INT8 Conv kernels efficiently.
+# "conv_silu" — Conv + SiLU (Mul nodes that implement x * sigmoid(x)).
+#               SiLU outputs feed directly into the next Conv, so fusing
+#               them can help on hardware with fast INT8 element-wise ops.
+# "blanket"   — Conv + SiLU + Add + Concat + MaxPool.  Maximises the size
+#               of contiguous INT8 subgraphs; most beneficial on GPUs with
+#               wide INT8 tensor-core throughput (e.g. Hopper, Blackwell).
+# ---------------------------------------------------------------------------
+_QUANT_PROFILES: dict[str, list[str]] = {
+    "conv":      ["Conv"],
+    "conv_silu": ["Conv", "SiLU"],
+    "blanket":   ["Conv", "SiLU", "Add", "Concat", "MaxPool"],
+}
+
 _INT8_EXCLUDES: dict[str, list[str]] = {
-    # YOLOv10 detection head: the one2one output branches that directly
-    # produce class scores and box coordinates.  Quantizing these collapses
-    # confidence scores (same issue as DFL Conv in YOLOv9).
-    "yolov10": ["model.23"],
-    "yolov10_v9_compatible": ["model.23"],
+    # YOLOv10 exclusions:
+    #   model.23 — detection head (one2one output branches for class scores
+    #              and box coordinates).  Quantizing these collapses confidence.
+    #   model.10 — PSA attention block (MatMul, Softmax, Add, etc.).
+    #              Non-uniform softmax distributions make INT8 inaccurate here.
+    "yolov10": ["model.23", "model.10"],
+    "yolov10_v9_compatible": ["model.23", "model.10"],
     # YOLOv9: exclusion rules not yet characterised.
     # Add entry once sensitivity analysis is complete.
 }
@@ -94,6 +114,7 @@ class YOLOExporter(ABC):
         runtime: str = "onnx",
         num_calibration_images: int = 300,
         model_type: str = "yolov10",
+        quant_profile: str = "conv",
         **kwargs,
     ) -> None:
         """Run the full export pipeline.
@@ -115,6 +136,10 @@ class YOLOExporter(ABC):
             model_type: Model architecture family ("yolov9", "yolov10",
                 "yolov10_v9_compatible").  Required for INT8 to look up the
                 correct exclusion rules.
+            quant_profile: INT8 quantization profile.  One of "conv" (default),
+                "conv_silu", or "blanket".  See ``_QUANT_PROFILES`` for the
+                node types each profile includes.  Only used when
+                ``export_format="int8"``.
         """
         if runtime not in ("onnx", "tensorrt"):
             raise ValueError(f"Unsupported runtime '{runtime}'. Use 'onnx' or 'tensorrt'.")
@@ -138,6 +163,7 @@ class YOLOExporter(ABC):
                 model_type=model_type,
                 input_size=input_shape[2],
                 num_calibration_images=num_calibration_images,
+                quant_profile=quant_profile,
             )
 
         # ── Step 3: Subclass-specific output merges ───────────────────────
@@ -292,40 +318,51 @@ class YOLOExporter(ABC):
         model_type: str,
         input_size: int,
         num_calibration_images: int,
+        quant_profile: str = "conv",
     ) -> onnx.ModelProto:
-        """Calibrate and wrap Conv nodes with INT8 QDQ pairs.
+        """Calibrate and wrap nodes with INT8 QDQ pairs.
 
         Uses model-type-specific exclusion rules so that accuracy-sensitive
-        layers (detection head, DFL, etc.) are kept at float32.
+        layers (detection head, PSA attention, etc.) are kept at float32.
+        The set of op types quantized is controlled by ``quant_profile``.
 
         Args:
             base_model: Float32 base YOLO ModelProto.
             model_type: Architecture family — used to look up exclusion list.
             input_size: Square input resolution (e.g. 640).
             num_calibration_images: Number of images for activation calibration.
+            quant_profile: One of "conv", "conv_silu", or "blanket".
 
         Returns:
-            ModelProto with QDQ nodes inserted around the selected Conv layers.
+            ModelProto with QDQ nodes inserted around the selected layers.
 
         Raises:
             NotImplementedError: If model_type has no characterised exclusion
                 rules yet.
+            ValueError: If quant_profile is not a known profile name.
         """
         from .quant import wrap_nodes_in_int8_qdq
 
+        if quant_profile not in _QUANT_PROFILES:
+            raise ValueError(
+                f"Unknown quant_profile '{quant_profile}'. "
+                f"Choose from: {list(_QUANT_PROFILES)}"
+            )
+        node_types = _QUANT_PROFILES[quant_profile]
         excludes = _get_int8_excludes(model_type)
         calib_loader = TRTCalibrationDataLoader(
             input_size=input_size,
             num_images=num_calibration_images,
         )
         LOGGER.info(
-            f"INT8 calibration: {num_calibration_images} images, "
+            f"INT8 calibration: profile='{quant_profile}', "
+            f"{num_calibration_images} images, "
             f"excluding substrings {excludes}"
         )
         return wrap_nodes_in_int8_qdq(
             base_model,
             calib_loader,
-            node_types=["Conv"],
+            node_types=node_types,
             exclude=excludes,
         )
 
