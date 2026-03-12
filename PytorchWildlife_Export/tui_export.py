@@ -221,7 +221,7 @@ class SummaryScreen(Screen):
         is_int8_trt = is_int8 and selections.get("runtime") == "tensorrt"
 
         quant_profile_line = (
-            f"\n- **Quant Profile**: `{selections.get('quant_profile', 'conv')}`"
+            "\n- **Quant Profile**: `blanket` (Conv + Add + MaxPool)"
             if is_int8
             else ""
         )
@@ -349,10 +349,7 @@ class ExecutionScreen(Screen):
         if selections.get("uint8_input"):
             cmd.append("--uint8_input")
         if selections.get("format") == "int8":
-            cmd += [
-                "--quant_profile",
-                selections.get("quant_profile", "conv"),
-            ]
+            cmd += ["--quant_profile", "blanket"]
         if (
             selections.get("runtime") == "tensorrt"
             and selections.get("format") == "int8"
@@ -405,12 +402,9 @@ class ExportTUI(App):
 
     def get_post_format_screen(self):
         if self.selections.get("format") == "int8":
-            return ChoiceSelectionScreen("quant_profile", self.get_post_quant_profile_screen)
-        return self.get_input_img_size_screen()
-
-    def get_post_quant_profile_screen(self):
-        if self.selections.get("runtime") == "tensorrt":
-            return InputScreen("num_calibration_images", self.get_input_img_size_screen)
+            self.selections["quant_profile"] = "blanket"
+            if self.selections.get("runtime") == "tensorrt":
+                return InputScreen("num_calibration_images", self.get_input_img_size_screen)
         return self.get_input_img_size_screen()
 
     def get_input_img_size_screen(self):

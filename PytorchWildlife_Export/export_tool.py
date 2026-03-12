@@ -109,15 +109,15 @@ def parse_args(argv=None):
     parser.add_argument(
         "--quant_profile",
         type=str,
-        default="conv",
+        default="blanket",
         choices=["conv", "blanket"],
         help=(
             "INT8 quantization profile. Controls which op types are wrapped in "
-            "QDQ pairs. 'conv' (default): Conv only — bias stored as INT32 so "
-            "TRT can fuse Conv+SiLU as a single epilogue kernel. "
-            "'blanket': Conv + Add + MaxPool — adds Q/DQ to residual Add nodes "
-            "to eliminate layout-reformat overhead on shortcut paths; "
-            "most beneficial on GPUs with wide INT8 tensor-core support. "
+            "QDQ pairs. 'blanket' (default): Conv + Add + MaxPool — eliminates "
+            "layout-reformat overhead on residual shortcut paths and enables "
+            "Conv+SiLU+Add fusion as a single INT8 kernel in TensorRT; observed "
+            "to be superior to 'conv' on all tested NVIDIA hardware. "
+            "'conv': Conv only — retained for experimentation. "
             "Only used when --format int8."
         ),
     )
