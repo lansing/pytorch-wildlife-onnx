@@ -39,19 +39,33 @@ LOGGER = logging.getLogger(__name__)
 #               wide INT8 tensor-core throughput (e.g. Hopper, Blackwell).
 # ---------------------------------------------------------------------------
 _QUANT_PROFILES: dict[str, list[str]] = {
-    "conv":      ["Conv"],
-    "conv_silu": ["Conv", "SiLU"],
-    "blanket":   ["Conv", "SiLU", "Add", "Concat", "MaxPool"],
+    # "conv": Conv layers only.  Bias is stored as INT32 inside the Conv node,
+    # allowing TRT to fuse the output DQ and following SiLU as a Conv epilogue —
+    # matching the Conv+SiLU fusion TRT achieves in the FP16 path.
+    "conv": ["Conv"],
+    # "blanket": extends to Add and MaxPool.  Adding Q/DQ on residual Add nodes
+    # gives TRT a unified INT8-compatible format for both the shortcut tensor
+    # (used as INT8 by the next Conv) and the Add residual input, eliminating
+    # the Reformatting CopyNodes that otherwise appear on shortcut paths.
+    # Concat is intentionally excluded: its output is already quantized by
+    # the following Conv's input Q, so adding a second Q/DQ would create
+    # redundant back-to-back quantization.
+    # TODO add Concat back here to test on Ampere after establishing baseline
+    "blanket": ["Conv", "Add", "MaxPool"],
 }
 
 _INT8_EXCLUDES: dict[str, list[str]] = {
     # YOLOv10 exclusions:
-    #   model.23 — detection head (one2one output branches for class scores
-    #              and box coordinates).  Quantizing these collapses confidence.
+    #   model.0  — first Conv (3 input channels, 640×640 spatial).  TRT has no
+    #              INT8 Tensor Core kernel for 3-channel inputs and cannot fuse
+    #              Conv+SiLU here; running it as FP16 is faster and enables
+    #              the same Conv+SiLU epilogue fusion seen in the FP16 baseline.
     #   model.10 — PSA attention block (MatMul, Softmax, Add, etc.).
     #              Non-uniform softmax distributions make INT8 inaccurate here.
-    "yolov10": ["model.23", "model.10"],
-    "yolov10_v9_compatible": ["model.23", "model.10"],
+    #   model.23 — detection head (one2one output branches for class scores
+    #              and box coordinates).  Quantizing these collapses confidence.
+    "yolov10": ["model.0", "model.10", "model.23"],
+    "yolov10_v9_compatible": ["model.0", "model.10", "model.23"],
     # YOLOv9: exclusion rules not yet characterised.
     # Add entry once sensitivity analysis is complete.
 }
@@ -136,13 +150,14 @@ class YOLOExporter(ABC):
             model_type: Model architecture family ("yolov9", "yolov10",
                 "yolov10_v9_compatible").  Required for INT8 to look up the
                 correct exclusion rules.
-            quant_profile: INT8 quantization profile.  One of "conv" (default),
-                "conv_silu", or "blanket".  See ``_QUANT_PROFILES`` for the
-                node types each profile includes.  Only used when
-                ``export_format="int8"``.
+            quant_profile: INT8 quantization profile.  One of "conv" (default)
+                or "blanket".  See ``_QUANT_PROFILES`` for the node types each
+                profile includes.  Only used when ``export_format="int8"``.
         """
         if runtime not in ("onnx", "tensorrt"):
-            raise ValueError(f"Unsupported runtime '{runtime}'. Use 'onnx' or 'tensorrt'.")
+            raise ValueError(
+                f"Unsupported runtime '{runtime}'. Use 'onnx' or 'tensorrt'."
+            )
 
         # For TRT we need tensorrt importable; check early.
         if runtime == "tensorrt":
@@ -205,6 +220,7 @@ class YOLOExporter(ABC):
             # Ensure output_path points to the engine (rename if needed)
             if engine_file != output_path:
                 import shutil
+
                 shutil.copy(engine_file, output_path)
 
     # -----------------------------------------------------------------------
@@ -304,8 +320,8 @@ class YOLOExporter(ABC):
             "simplify": do_simplify,
             "opset": opset_version,
             "workspace": 4,
-            "half": False,   # always float32; precision applied separately
-            "int8": False,   # always float32; quantization applied separately
+            "half": False,  # always float32; precision applied separately
+            "int8": False,  # always float32; quantization applied separately
             "name": os.path.basename(output_path),
             "exist_ok": True,
             "nms": False,
@@ -398,6 +414,7 @@ class YOLOExporter(ABC):
 
         try:
             import tensorrt as trt  # noqa: F401
+
             LOGGER.info(f"TensorRT version: {trt.__version__}")
         except ImportError:
             raise RuntimeError(

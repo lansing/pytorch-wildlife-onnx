@@ -110,13 +110,14 @@ def parse_args(argv=None):
         "--quant_profile",
         type=str,
         default="conv",
-        choices=["conv", "conv_silu", "blanket"],
+        choices=["conv", "blanket"],
         help=(
             "INT8 quantization profile. Controls which op types are wrapped in "
-            "QDQ pairs. 'conv' (default): Conv only — fastest on most hardware. "
-            "'conv_silu': Conv + SiLU activations. "
-            "'blanket': Conv + SiLU + Add + Concat + MaxPool — maximises INT8 "
-            "subgraph size; may help on GPUs with wide INT8 tensor-core throughput. "
+            "QDQ pairs. 'conv' (default): Conv only — bias stored as INT32 so "
+            "TRT can fuse Conv+SiLU as a single epilogue kernel. "
+            "'blanket': Conv + Add + MaxPool — adds Q/DQ to residual Add nodes "
+            "to eliminate layout-reformat overhead on shortcut paths; "
+            "most beneficial on GPUs with wide INT8 tensor-core support. "
             "Only used when --format int8."
         ),
     )

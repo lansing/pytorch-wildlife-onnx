@@ -43,11 +43,9 @@ instructions:
   quant_profile: |
     Select which op types are wrapped in INT8 QDQ pairs.
 
-    **Conv** (default) — Conv layers only. Fastest on most tested hardware; TRT fuses INT8 Conv kernels very efficiently.
+    **Conv** (default) — Conv layers only. Bias is stored as a pre-scaled INT32 value inside the Conv node, which lets TRT fuse the output dequantize step and the following SiLU activation into a single Conv epilogue kernel — matching the Conv+SiLU fusion TRT achieves in the FP16 path.
 
-    **Conv + SiLU** — also quantizes the SiLU activations (x · σ(x)) that follow each Conv. May improve throughput on GPUs with fast INT8 element-wise kernels.
-
-    **Blanket** — Conv + SiLU + Add + Concat + MaxPool. Maximises the size of contiguous INT8 subgraphs. Most beneficial on GPUs with wide INT8 tensor-core throughput (e.g. NVIDIA Hopper / Blackwell architecture).
+    **Blanket** — Conv + Add + Concat + MaxPool. Extends INT8 across residual connections so TRT can keep activations INT8 through entire C2f blocks. Most beneficial on GPUs with wide INT8 tensor-core throughput (e.g. NVIDIA Hopper / Blackwell architecture).
   run_export: "Review the selected options below and proceed to run the export."
 
 options:
@@ -88,11 +86,9 @@ options:
       label: 'INT8 (quantized)'
   quant_profile:
     - value: 'conv'
-      label: 'Conv — quantize Conv layers only (default, fastest on most hardware)'
-    - value: 'conv_silu'
-      label: 'Conv + SiLU — also quantize SiLU activations'
+      label: 'Conv — Conv layers only, bias fused as INT32 (default)'
     - value: 'blanket'
-      label: 'Blanket — Conv + SiLU + Add + Concat + MaxPool (best on Hopper/Blackwell)'
+      label: 'Blanket — Conv + Add + MaxPool (best on Hopper/Blackwell)'
   denormalized_input:
     - value: False
       label: 'No  — exported model expects 0.0–1.0 input (default)'
