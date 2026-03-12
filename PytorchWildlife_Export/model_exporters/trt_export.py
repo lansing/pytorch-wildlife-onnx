@@ -1,79 +1,86 @@
 """
 TensorRT engine export utilities.
 
-onnx2engine_explicit: Build a TRT engine from an ONNX model that already
-contains QDQ (QuantizeLinear / DequantizeLinear) calibration nodes produced
-by wrap_nodes_in_int8_qdq().  TRT reads the embedded per-tensor scales
-directly — no calibration table is required.  This is "explicit quantization"
-mode.
+Single entry point: ``onnx2engine()``.
 
-How explicit quantization works (TRT 10):
-  - The ONNX model contains Q/DQ node pairs around each quantized layer's
-    inputs and weights.  Each Q/DQ pair carries a float32 scale + int8
-    zero-point (always 0 for symmetric quantization).
-  - Setting BuilderFlag.INT8 tells TRT that INT8 kernels are allowed.
-    When Q/DQ nodes are present TRT's optimizer fuses them with the
-    surrounding Conv / MatMul into a single INT8 kernel (explicit
-    quantization mode), rather than using an IInt8Calibrator.
-  - Setting BuilderFlag.FP16 (optional) lets layers that have no Q/DQ
-    coverage (e.g. the excluded detection head) fall back to FP16 instead
-    of FP32, giving a small additional speedup.
-  - No calibrator object is set — presence of Q/DQ nodes is the signal to
-    TRT to use explicit mode.
+Precision modes
+---------------
+"float32"
+    Plain FP32 engine.  No precision flags set beyond EXPLICIT_BATCH.
 
-Compared with ultralytics onnx2engine:
-  - INT8 calibration dataset + IInt8Calibrator replaced by Q/DQ nodes.
-  - No metadata prefix written (engine can be read with plain file.read()).
-  - Verbose logging of parsed I/O tensors is always printed.
+"float16"
+    FP16 engine.  Sets BuilderFlag.FP16.  TRT picks FP16 kernels where
+    available and falls back to FP32 for ops that have no FP16 path.
+
+"int8"
+    Explicit INT8 engine.  The ONNX *must* already contain
+    QuantizeLinear / DequantizeLinear (QDQ) nodes produced by
+    ``wrap_nodes_in_int8_qdq()``.  TRT reads the embedded per-tensor
+    scales directly ("explicit quantization" mode) — no calibration
+    dataset is required.  Setting BuilderFlag.INT8 tells TRT that INT8
+    kernels are allowed; setting BuilderFlag.FP16 additionally lets
+    layers without Q/DQ coverage fall back to FP16 instead of FP32.
+
+Compared with ultralytics onnx2engine
+--------------------------------------
+* INT8 path: uses embedded Q/DQ scales instead of an IInt8Calibrator.
+* Always writes a plain engine file (no JSON metadata prefix) so the
+  file can be deserialised with a plain ``file.read()`` call.
+* Detailed profiling verbosity enabled for per-layer TRT timing via
+  trtexec --profilingVerbosity.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 
-def onnx2engine_explicit(
+def onnx2engine(
     onnx_file: str,
     engine_file: str | None = None,
     workspace_gb: float = 4.0,
+    precision: str = "float32",
     fp16_fallback: bool = True,
     verbose: bool = False,
-    metadata: dict | None = None,
 ) -> str:
-    """Build a TensorRT engine from an ONNX model with embedded QDQ nodes.
+    """Build a TensorRT engine from an ONNX file.
 
-    Steps (mirrors ultralytics onnx2engine for the explicit-quantization path):
+    Steps (mirrors ultralytics onnx2engine structure):
         1. Create TRT Logger / Builder / BuilderConfig.
         2. Set workspace memory pool limit.
-        3. Create network with EXPLICIT_BATCH flag (required for ONNX + QDQ).
-        4. Set INT8 flag — enables INT8 kernels.  With Q/DQ nodes present TRT
-           uses their embedded scale/zero-point ("explicit quantization" mode)
-           instead of an IInt8Calibrator.
-        5. Optionally set FP16 flag so layers without Q/DQ fall back to FP16.
-        6. Set DETAILED profiling verbosity for per-layer timing.
-        7. Parse the ONNX file with OnnxParser; raise on parse errors.
-        8. Build and serialise engine to disk (optional JSON metadata prefix).
+        3. Create network with EXPLICIT_BATCH flag (required for ONNX).
+        4. Set precision flags:
+             float32 : no extra flags.
+             float16 : BuilderFlag.FP16.
+             int8    : BuilderFlag.INT8 (reads Q/DQ scales from ONNX —
+                       explicit quantization, no calibrator).  Also sets
+                       BuilderFlag.FP16 when fp16_fallback=True so layers
+                       without Q/DQ coverage fall back to FP16.
+        5. Enable DETAILED profiling verbosity.
+        6. Parse ONNX; raise on parse errors.
+        7. Build and serialise engine to disk.
 
     Args:
-        onnx_file: Path to the quantized ONNX model containing QDQ nodes.
+        onnx_file: Path to the ONNX model.
         engine_file: Destination path.  Defaults to onnx_file with .engine
             suffix.
         workspace_gb: GPU memory for TRT optimisation workspace (default 4 GB).
-        fp16_fallback: Allow FP16 for layers without INT8 Q/DQ coverage.
-        verbose: Enable TRT VERBOSE logging (very chatty).
-        metadata: Optional dict serialised to JSON and prepended to the engine
-            file (same 4-byte-length-prefix format as ultralytics onnx2engine).
-            Pass None (default) to write a plain engine file readable with a
-            simple open().read() → deserialize_cuda_engine() call.
+        precision: One of "float32", "float16", "int8".
+        fp16_fallback: For precision="int8", allow FP16 for layers without
+            INT8 Q/DQ coverage.  Ignored for other precisions.
+        verbose: Enable TRT VERBOSE logging.
 
     Returns:
-        Absolute path of the written engine file (str).
+        Absolute path of the written engine file.
 
     Raises:
+        ValueError: For unknown precision.
         RuntimeError: If ONNX parsing or engine build fails.
     """
     import tensorrt as trt
+
+    if precision not in ("float32", "float16", "int8"):
+        raise ValueError(f"Unknown precision '{precision}'. Use 'float32', 'float16', or 'int8'.")
 
     onnx_path = Path(onnx_file)
     engine_path = Path(engine_file) if engine_file else onnx_path.with_suffix(".engine")
@@ -90,17 +97,23 @@ def onnx2engine_explicit(
     else:
         config.max_workspace_size = workspace_bytes  # type: ignore[attr-defined]
 
-    # Network with EXPLICIT_BATCH — required for ONNX models and QDQ fusion
+    # Network — EXPLICIT_BATCH required for ONNX models
     flag = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(flag)
 
-    # INT8 flag — with Q/DQ nodes in the ONNX, TRT enters explicit
-    # quantization mode and reads the embedded scales. No calibrator needed.
-    config.set_flag(trt.BuilderFlag.INT8)
-    if fp16_fallback and builder.platform_has_fast_fp16:
+    # Precision flags
+    if precision == "float16":
+        if not builder.platform_has_fast_fp16:
+            print("  WARNING: platform_has_fast_fp16 is False; FP16 engine may be slow.")
         config.set_flag(trt.BuilderFlag.FP16)
+    elif precision == "int8":
+        # INT8 flag + Q/DQ nodes in the ONNX → TRT enters explicit-quantization
+        # mode.  No IInt8Calibrator needed; embedded scales are used directly.
+        config.set_flag(trt.BuilderFlag.INT8)
+        if fp16_fallback and builder.platform_has_fast_fp16:
+            config.set_flag(trt.BuilderFlag.FP16)
 
-    # Detailed profiling so per-layer timing is available via trtexec --profilingVerbosity
+    # Detailed per-layer profiling (accessible via trtexec --profilingVerbosity)
     config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
 
     # Parse ONNX
@@ -118,8 +131,12 @@ def onnx2engine_explicit(
         out = network.get_output(i)
         print(f"  TRT output [{i}]: {out.name}  {tuple(out.shape)}  {out.dtype}")
 
-    prec = "INT8" + (" + FP16 fallback" if fp16_fallback else " + FP32 fallback")
-    print(f"Building TRT engine ({prec}, explicit quantization) ...")
+    prec_label = {
+        "float32": "FP32",
+        "float16": "FP16",
+        "int8": f"INT8 explicit + {'FP16' if fp16_fallback else 'FP32'} fallback",
+    }[precision]
+    print(f"Building TRT engine ({prec_label}) ...")
 
     build_fn = builder.build_serialized_network if is_trt10 else builder.build_engine  # type: ignore[attr-defined]
     with build_fn(network, config) as engine:
@@ -127,11 +144,31 @@ def onnx2engine_explicit(
             raise RuntimeError("TRT engine build failed — check log output above.")
         engine_path.parent.mkdir(parents=True, exist_ok=True)
         with open(engine_path, "wb") as f:
-            if metadata is not None:
-                meta = json.dumps(metadata)
-                f.write(len(meta).to_bytes(4, byteorder="little", signed=True))
-                f.write(meta.encode())
             f.write(engine if is_trt10 else engine.serialize())
 
     print(f"TRT engine saved: {engine_path}")
     return str(engine_path)
+
+
+def onnx2engine_explicit(
+    onnx_file: str,
+    engine_file: str | None = None,
+    workspace_gb: float = 4.0,
+    fp16_fallback: bool = True,
+    verbose: bool = False,
+    metadata: dict | None = None,
+) -> str:
+    """Build a TRT engine from an ONNX model with embedded QDQ nodes.
+
+    Convenience wrapper around ``onnx2engine(precision='int8')``.
+    The ``metadata`` parameter is accepted for backward compatibility but
+    ignored — the engine is always written without a metadata prefix.
+    """
+    return onnx2engine(
+        onnx_file=onnx_file,
+        engine_file=engine_file,
+        workspace_gb=workspace_gb,
+        precision="int8",
+        fp16_fallback=fp16_fallback,
+        verbose=verbose,
+    )

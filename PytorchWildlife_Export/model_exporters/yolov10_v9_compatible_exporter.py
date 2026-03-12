@@ -1,13 +1,6 @@
-import os
-import shutil
-from typing import Literal, Optional
-
-import onnx
 import torch
-import torch.nn as nn
-from ultralytics import YOLO
+import onnx
 
-from .input_preprocessing_wrapper import InputPreprocessingWrapper
 from .util import merge_onnx_models
 from .yolo_exporter import YOLOExporter
 from .yolov10_v9_output_converter import YOLOv10ToYOLOv9OutputConverter
@@ -15,32 +8,38 @@ from .yolov10_v9_output_converter import YOLOv10ToYOLOv9OutputConverter
 
 class YOLOv10V9CompatibleONNXExporter(YOLOExporter):
     """
-    An ONNX exporter specifically for YOLOv10 models, that outputs a tensor
-    compatible with YOLOv9 raw output format.
+    YOLO exporter that appends a YOLOv10→YOLOv9 output-format converter.
+
+    The base YOLOv10 model outputs ``(B, 300, 6)`` one2one predictions.
+    This subclass merges an output-converter module that reshapes the raw
+    detections into the YOLOv9 ``(B, 84, N)`` layout expected by downstream
+    YOLOv9-compatible post-processors.
     """
 
     def do_your_merges(
-        self, yolo_output_shape, onnx_base_model_path, num_classes, opset_version
-    ):
+        self,
+        yolo_output_shape: tuple,
+        base_model: onnx.ModelProto,
+        num_classes: int,
+        opset_version: int,
+    ) -> onnx.ModelProto:
         converter_module = YOLOv10ToYOLOv9OutputConverter(num_classes=num_classes)
         converter_module.eval()
-        tmp_output_path = "/tmp/yolo_v10v9_merged.onnx"
+        tmp_converter_path = "/tmp/yolo_v10v9_converter.onnx"
 
         yolov10_output = torch.zeros(yolo_output_shape)
-
         torch.onnx.export(
             converter_module,
             args=(yolov10_output,),
             opset_version=opset_version,
-            f=tmp_output_path,
-            dynamo=False,  # match ultralytics, otherwise IR changes
+            f=tmp_converter_path,
+            dynamo=False,
         )
 
         merged_model = merge_onnx_models(
-            onnx_base_model_path,
-            tmp_output_path,
+            base_model,
+            tmp_converter_path,
             prefix1="YOLOV10",
             prefix2="YOLOv10ToYOLOv9OutputConverter",
         )
-
         return merged_model

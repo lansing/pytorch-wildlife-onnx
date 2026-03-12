@@ -1,7 +1,22 @@
 #!/bin/bash
 
-# Define image name
-IMAGE_NAME="pytorch-wildlife-export-tui"
+# Parse arguments
+USE_TRT=0
+for arg in "$@"; do
+    case "$arg" in
+        --trt) USE_TRT=1 ;;
+        *) echo "Unknown option: $arg"; echo "Usage: $0 [--trt]"; exit 1 ;;
+    esac
+done
+
+# Select image name and Dockerfile based on --trt flag
+if [ "$USE_TRT" -eq 1 ]; then
+    IMAGE_NAME="pytorch-wildlife-export-trt"
+    DOCKERFILE="Dockerfile.trt"
+else
+    IMAGE_NAME="pytorch-wildlife-export-tui"
+    DOCKERFILE="Dockerfile"
+fi
 
 # Define local directories to be mounted
 LOCAL_CHECKPOINTS_DIR="checkpoints"
@@ -18,11 +33,10 @@ mkdir -p "$LOCAL_CHECKPOINTS_DIR"
 mkdir -p "$LOCAL_EXPORTED_MODELS_DIR"
 mkdir -p "$LOCAL_CALIB_CACHE_DIR"
 
-echo "Building Docker image: $IMAGE_NAME..."
-# Build the Docker image
+echo "Building Docker image: $IMAGE_NAME (using $DOCKERFILE)..."
 # TODO add back --no-cache for distribution
-#docker build --no-cache -t "$IMAGE_NAME" .
-docker build --build-arg CACHE_BUSTER=$(date +%s) -t "$IMAGE_NAME" .
+#docker build --no-cache -f "$DOCKERFILE" -t "$IMAGE_NAME" .
+docker build --build-arg CACHE_BUSTER=$(date +%s) -f "$DOCKERFILE" -t "$IMAGE_NAME" .
 
 if [ $? -ne 0 ]; then
     echo "Docker image build failed. Exiting."
@@ -33,12 +47,14 @@ echo "Running TUI in Docker container..."
 echo "Mounting $LOCAL_CHECKPOINTS_DIR to $CONTAINER_CHECKPOINTS_DIR"
 echo "Mounting $LOCAL_EXPORTED_MODELS_DIR to $CONTAINER_EXPORTED_MODELS_DIR"
 
-# Run the Docker container
-# The -it flag is crucial for interactive TUI applications
-# --rm removes the container after it exits
-# -v mounts the local directories to the container paths
-# --entrypoint can be used to override the Dockerfile's ENTRYPOINT if needed, but not here
-docker run -it --rm \
+# For TRT we need GPU access; use --runtime nvidia
+if [ "$USE_TRT" -eq 1 ]; then
+    DOCKER_RUN_FLAGS="--runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all"
+else
+    DOCKER_RUN_FLAGS=""
+fi
+
+docker run -it --rm $DOCKER_RUN_FLAGS \
     -v "$(pwd)/$LOCAL_CHECKPOINTS_DIR:$CONTAINER_CHECKPOINTS_DIR" \
     -v "$(pwd)/$LOCAL_EXPORTED_MODELS_DIR:$CONTAINER_EXPORTED_MODELS_DIR" \
     -v "$(pwd)/$LOCAL_CALIB_CACHE_DIR:$CONTAINER_CALIB_CACHE_DIR" \

@@ -131,7 +131,7 @@ class InputScreen(BaseSelectionScreen):
     def __init__(self, key: str, next_screen_callable, **kwargs):
         super().__init__(key, **kwargs)
         self.next_screen_callable = next_screen_callable
-        self.input_type = "number" if key in ["input_img_size", "opset", "num_calibration_images"] else "text"
+        self.input_type = "number" if key in ["input_img_size", "num_calibration_images"] else "text"
         self.min_val = (
             CONFIG["ranges"][key].get("min") if self.input_type == "number" else None
         )
@@ -235,8 +235,6 @@ class SummaryScreen(Screen):
 - **Output Path**: `{output_path}`
 - **Format**: `{selections["format"]}`
 - **Input Image Size**: `{selections["input_img_size"]}`
-- **Opset Version**: `{selections["opset"]}`
-- **Simplify Model**: `{selections["simplify"]}`
 - **Input Preprocessing**: `{preproc_str}`{calib_line}
 """
 
@@ -335,12 +333,11 @@ class ExecutionScreen(Screen):
             "--input_img_size",
             str(selections["input_img_size"]),
             "--opset",
-            str(selections["opset"]),
+            "18",
+            "--simplify",
             "--runtime",
             selections["runtime"],
         ]
-        if selections["simplify"]:
-            cmd.append("--simplify")
         if selections.get("denormalized_input"):
             cmd.append("--denormalized_input")
         if selections.get("nhwc_input"):
@@ -406,13 +403,7 @@ class ExportTUI(App):
         return self.get_input_img_size_screen()
 
     def get_input_img_size_screen(self):
-        return InputScreen("input_img_size", self.get_opset_screen)
-
-    def get_opset_screen(self):
-        return InputScreen("opset", self.get_simplify_screen)
-
-    def get_simplify_screen(self):
-        return ChoiceSelectionScreen("simplify", self.get_allow_denormalized_screen)
+        return InputScreen("input_img_size", self.get_allow_denormalized_screen)
 
     def get_allow_denormalized_screen(self):
         return ChoiceSelectionScreen("denormalized_input", self.get_allow_nhwc_screen)

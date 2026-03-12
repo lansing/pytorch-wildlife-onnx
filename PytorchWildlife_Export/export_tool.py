@@ -47,8 +47,8 @@ def parse_args(argv=None):
         "--format",
         type=str,
         default="float32",
-        choices=["float32", "float16", "int8", "uint8"],
-        help="Numeric format for the exported ONNX model ('float32', 'float16', 'int8', 'uint8').",
+        choices=["float32", "float16", "int8"],
+        help="Numeric format for the exported model ('float32', 'float16', 'int8').",
     )
     parser.add_argument(
         "--opset",
@@ -100,11 +100,10 @@ def parse_args(argv=None):
     parser.add_argument(
         "--num_calibration_images",
         type=int,
-        default=500,
+        default=100,
         help=(
             "Number of images to stream from the calibration dataset for INT8 "
-            "TensorRT quantization. Only used when --runtime tensorrt and "
-            "--format int8. Default is 500."
+            "quantization. Only used when --format int8. Default is 100."
         ),
     )
 
@@ -173,6 +172,7 @@ def main(args=None):
         denormalized_input=args.denormalized_input,
         runtime=args.runtime,
         num_calibration_images=args.num_calibration_images,
+        model_type=args.model_type,
     )
 
     if args.model_type in ("yolov9", "yolov10"):
