@@ -201,6 +201,8 @@ class YOLOExporter(ABC):
         )
         LOGGER.info(f"Intermediate ONNX model at: {onnx_base_model_path}")
 
+        # TODO: eventually move quantization step to here
+
         yolo_output_shape = model.model(torch.zeros(input_shape))[0].shape
 
         # do model-specific merges (i.e. output converter)

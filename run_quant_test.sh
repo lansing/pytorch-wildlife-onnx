@@ -47,4 +47,4 @@ docker run --runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all --rm \
     -v "$(pwd):/app" \
     --entrypoint python3 \
     "$IMAGE_NAME" \
-    PytorchWildlife_Export/demo/yolov10_quant.py
+    PytorchWildlife_Export/demo/yolov10_trt_quant.py
