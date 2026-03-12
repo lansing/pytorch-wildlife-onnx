@@ -43,15 +43,14 @@ _QUANT_PROFILES: dict[str, list[str]] = {
     # allowing TRT to fuse the output DQ and following SiLU as a Conv epilogue —
     # matching the Conv+SiLU fusion TRT achieves in the FP16 path.
     "conv": ["Conv"],
-    # "blanket": extends to Add and MaxPool.  Adding Q/DQ on residual Add nodes
-    # gives TRT a unified INT8-compatible format for both the shortcut tensor
-    # (used as INT8 by the next Conv) and the Add residual input, eliminating
-    # the Reformatting CopyNodes that otherwise appear on shortcut paths.
-    # Concat is intentionally excluded: its output is already quantized by
-    # the following Conv's input Q, so adding a second Q/DQ would create
-    # redundant back-to-back quantization.
-    # TODO add Concat back here to test on Ampere after establishing baseline
-    "blanket": ["Conv", "Add", "MaxPool"],
+    # "blanket": extends to Add, Concat, and MaxPool.
+    # Add: Q/DQ on residual Add nodes gives TRT a unified INT8 format for
+    # shortcut paths, eliminating Reformatting CopyNodes.
+    # Concat: wrapped with a *shared* scale across all inputs and the output
+    # (max of all calibrated scales).  Uniform-scale Q/DQ lets TRT run Concat
+    # natively in INT8 rather than falling back to FP16 and cloning Q nodes
+    # per downstream consumer.  See wrap_nodes_in_int8_qdq for details.
+    "blanket": ["Conv", "Add", "Concat", "MaxPool"],
 }
 
 _INT8_EXCLUDES: dict[str, list[str]] = {

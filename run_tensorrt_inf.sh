@@ -48,7 +48,6 @@ docker run -it --runtime nvidia --rm \
     --loadEngine=/app/PytorchWildlife_Export/demo/demo_output/MDV6-yolov10-e_int8_640_denorm_nhwc_uint8input.engine \
     --iterations=1000 \
     --warmUp=200 \
-
-     # --dumpLayerInfo \
-     # --dumpProfile \
-     # --profilingVerbosity=detailed
+     --dumpLayerInfo \
+     --dumpProfile \
+     --profilingVerbosity=detailed

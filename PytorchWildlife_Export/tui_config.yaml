@@ -88,7 +88,7 @@ options:
     - value: 'conv'
       label: 'Conv — Conv layers only, bias fused as INT32 (default)'
     - value: 'blanket'
-      label: 'Blanket — Conv + Add + MaxPool (best on Hopper/Blackwell)'
+      label: 'Blanket — Conv + Add + Concat + MaxPool, shared-scale Concat (best on Ampere+)'
   denormalized_input:
     - value: False
       label: 'No  — exported model expects 0.0–1.0 input (default)'

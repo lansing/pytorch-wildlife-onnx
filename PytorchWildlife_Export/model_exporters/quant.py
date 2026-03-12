@@ -780,9 +780,37 @@ def wrap_nodes_in_int8_qdq(
         model, target_names, calibration_loader, silu_map=silu_map
     )
 
+    # Build op-type map from the original model so we can apply Concat-specific
+    # shared-scale logic before any nodes have been rewritten.
+    node_op_map = {n.name: n.op_type for n in model.graph.node}
+
     result = model
     for node_name in target_names:
         in_scales, out_scale = scales[node_name]
+
+        if node_op_map.get(node_name) == "Concat":
+            # Shared-scale INT8 Concat:
+            #
+            # With per-input scales (heterogeneous), TRT cannot merge all inputs
+            # into one INT8 layout and falls back to: DQ each input to FP16 →
+            # Concat in FP16 → clone Q per downstream consumer.  That creates a
+            # separate Q kernel for every consumer of the Concat output.
+            #
+            # A single shared scale avoids the heterogeneity.  The pattern
+            # Q(s) → Concat → DQ(s) is a first-class INT8 Concat in TRT's
+            # explicit-quantization mode: all inputs arrive as INT8 at the same
+            # scale, Concat runs INT8, the output DQ is a single shared buffer.
+            # Inputs whose preceding DQ had a different scale undergo a DQ→Q
+            # requantise, which TRT may fuse into the preceding Conv epilogue.
+            s_shared = max(max(in_scales, default=0.0), out_scale)
+            LOGGER.info(
+                f"  Concat '{node_name}': using shared scale {s_shared:.6f} "
+                f"(inputs max={max(in_scales, default=0.0):.6f}, "
+                f"output={out_scale:.6f})"
+            )
+            in_scales = [s_shared] * len(in_scales)
+            out_scale = s_shared
+
         result = wrap_node_in_int8_qdq(
             result, node_name,
             input_scales=in_scales,
