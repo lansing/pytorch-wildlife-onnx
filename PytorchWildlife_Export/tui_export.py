@@ -131,7 +131,7 @@ class InputScreen(BaseSelectionScreen):
     def __init__(self, key: str, next_screen_callable, **kwargs):
         super().__init__(key, **kwargs)
         self.next_screen_callable = next_screen_callable
-        self.input_type = "number" if key in ["input_img_size", "opset"] else "text"
+        self.input_type = "number" if key in ["input_img_size", "num_calibration_images"] else "text"
         self.min_val = (
             CONFIG["ranges"][key].get("min") if self.input_type == "number" else None
         )
@@ -208,15 +208,34 @@ class SummaryScreen(Screen):
         selections = self.app.selections
         output_path = self.get_output_path()
 
+        preproc_parts = []
+        if selections.get("denormalized_input"):
+            preproc_parts.append("denormalized (0-255)")
+        if selections.get("nhwc_input"):
+            preproc_parts.append("NHWC layout")
+        if selections.get("uint8_input"):
+            preproc_parts.append("uint8 dtype")
+        preproc_str = ", ".join(preproc_parts) if preproc_parts else "none"
+
+        is_int8_trt = (
+            selections.get("runtime") == "tensorrt"
+            and selections.get("format") == "int8"
+        )
+        calib_line = (
+            f"\n- **Calibration Images**: `{selections['num_calibration_images']}`"
+            if is_int8_trt
+            else ""
+        )
+
         return f"""
 - **Model Type**: `{selections["model_type"]}`
 - **Model Version**: `{selections["model_version"]}`
+- **Runtime**: `{selections["runtime"]}`
 - **Output Directory**: `{selections["output_dir"]}`
 - **Output Path**: `{output_path}`
 - **Format**: `{selections["format"]}`
 - **Input Image Size**: `{selections["input_img_size"]}`
-- **Opset Version**: `{selections["opset"]}`
-- **Simplify Model**: `{selections["simplify"]}`
+- **Input Preprocessing**: `{preproc_str}`{calib_line}
 """
 
     def get_output_path(self) -> str:
@@ -227,7 +246,14 @@ class SummaryScreen(Screen):
         )
         if selections["model_type"] == "yolov10_v9_compatible":
             filename_base += "_v9_compat"
-        filename = f"{filename_base}.onnx"
+        if selections.get("denormalized_input"):
+            filename_base += "_denorm"
+        if selections.get("nhwc_input"):
+            filename_base += "_nhwc"
+        if selections.get("uint8_input"):
+            filename_base += "_uint8input"
+        ext = ".engine" if selections.get("runtime") == "tensorrt" else ".onnx"
+        filename = f"{filename_base}{ext}"
         return os.path.join(selections["output_dir"], filename)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -244,7 +270,7 @@ class ExecutionScreen(Screen):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="log_container"):
             yield Static("Starting export...", id="log_header")
-            yield Log(id="log_output")
+            yield Log(id="log_output", )
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -307,10 +333,25 @@ class ExecutionScreen(Screen):
             "--input_img_size",
             str(selections["input_img_size"]),
             "--opset",
-            str(selections["opset"]),
+            "18",
+            "--simplify",
+            "--runtime",
+            selections["runtime"],
         ]
-        if selections["simplify"]:
-            cmd.append("--simplify")
+        if selections.get("denormalized_input"):
+            cmd.append("--denormalized_input")
+        if selections.get("nhwc_input"):
+            cmd.append("--nhwc_input")
+        if selections.get("uint8_input"):
+            cmd.append("--uint8_input")
+        if (
+            selections.get("runtime") == "tensorrt"
+            and selections.get("format") == "int8"
+        ):
+            cmd += [
+                "--num_calibration_images",
+                str(selections.get("num_calibration_images", 300)),
+            ]
         return cmd
 
 
@@ -342,22 +383,36 @@ class ExportTUI(App):
         return ChoiceSelectionScreen("model_type", self.get_model_version_screen)
 
     def get_model_version_screen(self):
-        return ChoiceSelectionScreen("model_version", self.get_output_dir_screen)
+        return ChoiceSelectionScreen("model_version", self.get_runtime_screen)
+
+    def get_runtime_screen(self):
+        return ChoiceSelectionScreen("runtime", self.get_output_dir_screen)
 
     def get_output_dir_screen(self):
         return InputScreen("output_dir", self.get_format_screen)
 
     def get_format_screen(self):
-        return ChoiceSelectionScreen("format", self.get_input_img_size_screen)
+        return ChoiceSelectionScreen("format", self.get_post_format_screen)
+
+    def get_post_format_screen(self):
+        if (
+            self.selections.get("runtime") == "tensorrt"
+            and self.selections.get("format") == "int8"
+        ):
+            return InputScreen("num_calibration_images", self.get_input_img_size_screen)
+        return self.get_input_img_size_screen()
 
     def get_input_img_size_screen(self):
-        return InputScreen("input_img_size", self.get_opset_screen)
+        return InputScreen("input_img_size", self.get_allow_denormalized_screen)
 
-    def get_opset_screen(self):
-        return InputScreen("opset", self.get_simplify_screen)
+    def get_allow_denormalized_screen(self):
+        return ChoiceSelectionScreen("denormalized_input", self.get_allow_nhwc_screen)
 
-    def get_simplify_screen(self):
-        return ChoiceSelectionScreen("simplify", self.get_summary_screen)
+    def get_allow_nhwc_screen(self):
+        return ChoiceSelectionScreen("nhwc_input", self.get_allow_uint8_screen)
+
+    def get_allow_uint8_screen(self):
+        return ChoiceSelectionScreen("uint8_input", self.get_summary_screen)
 
     def get_summary_screen(self):
         return SummaryScreen()

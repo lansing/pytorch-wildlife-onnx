@@ -9,7 +9,6 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from model_loaders.yolov9_loader import YoloV9Loader
-from model_loaders.rtdetr_loader import RTDETRLoader
 
 class TestModelLoaders(unittest.TestCase):
 
@@ -23,15 +22,7 @@ class TestModelLoaders(unittest.TestCase):
         self.assertIsInstance(model, nn.Module, "Loaded object should be a torch.nn.Module")
         print("YOLOv9 model loaded successfully and is an instance of torch.nn.Module.")
 
-    def test_rtdetr_loader(self):
-        """
-        Test the RTDETRLoader to ensure it loads the model correctly.
-        """
-        print("\nTesting RTDETRLoader...")
-        loader = RTDETRLoader(version='MDV6-apa-rtdetr-c')
-        model = loader.load_model()
-        self.assertIsInstance(model, nn.Module, "Loaded object should be a torch.nn.Module")
-        print("RT-DETR model loaded successfully and is an instance of torch.nn.Module.")
+
 
 if __name__ == '__main__':
     unittest.main()

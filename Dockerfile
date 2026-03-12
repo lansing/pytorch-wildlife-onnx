@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y cmake build-essential libxcb1 libgl1 li
 RUN pip install --no-cache-dir -r ./PytorchWildlife_Export/requirements.txt
 
 # Copy the rest of your application code
+ARG CACHE_BUSTER=default_value
 COPY . .
 
 # Create directories for mounted volumes if they don't exist
@@ -30,4 +31,3 @@ ENV PYTHONUNBUFFERED=1
 # Define the entrypoint to run the TUI script
 # The command will be overridden by the bash script to pass arguments
 ENTRYPOINT ["python", "PytorchWildlife_Export/tui_export.py"]
-

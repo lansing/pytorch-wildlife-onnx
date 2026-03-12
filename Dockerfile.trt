@@ -1,0 +1,54 @@
+# ── Stage 1: pip installer ──────────────────────────────────────────────────
+# Needs cmake + build-essential to compile any wheels that ship without a
+# prebuilt binary for this platform.  These build tools are NOT carried into
+# the final image.
+FROM nvcr.io/nvidia/tensorrt:26.01-py3 AS pip_builder
+
+WORKDIR /app
+
+# Install build-time system deps
+RUN apt-get update && apt-get install -y \
+        cmake build-essential \
+        --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first so this layer is cached as long as requirements.txt
+# does not change — even when source code changes.
+COPY PytorchWildlife_Export/requirements-trt.txt ./PytorchWildlife_Export/
+
+RUN pip install --no-cache-dir -r ./PytorchWildlife_Export/requirements-trt.txt
+
+
+# ── Stage 2: runtime image ───────────────────────────────────────────────────
+FROM nvcr.io/nvidia/tensorrt:26.01-py3
+
+WORKDIR /app
+
+# Runtime-only system deps (no cmake, no build-essential)
+RUN apt-get update && apt-get install -y \
+        libxcb1 libgl1 libsm6 libxext6 libxrender1 \
+        libjpeg-dev libpng-dev libtiff-dev libwebp-dev ffmpeg \
+        --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python packages from the pip_builder stage.
+# /usr/local/lib contains dist-packages; /usr/local/bin contains console scripts.
+# COPY merges into the existing directories — base contents are identical in both
+# stages (same FROM), so the result is: base packages + our pip-installed packages.
+COPY --from=pip_builder /usr/local/lib /usr/local/lib
+COPY --from=pip_builder /usr/local/bin /usr/local/bin
+
+# Copy only the application package — not the whole repo.
+# CACHE_BUSTER can be passed via --build-arg to force-refresh this layer
+# without invalidating the pip install layers above.
+ARG CACHE_BUSTER=stable
+COPY PytorchWildlife_Export/ ./PytorchWildlife_Export/
+
+# Create directories for mounted volumes
+RUN mkdir -p /exported_models \
+             /root/.cache/torch/hub/checkpoints \
+             /root/.cache/pytorch_wildlife_export/calibration
+
+ENV PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["python", "PytorchWildlife_Export/tui_export.py"]

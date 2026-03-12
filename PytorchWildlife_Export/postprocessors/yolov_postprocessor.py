@@ -3,6 +3,8 @@ import cv2
 import torch # Keep torch for now to convert numpy array to torch tensor for non_max_suppression_np
 from typing import List, Dict, Tuple, Any
 
+from .util import scale_boxes_np
+
 def xywh2xyxy_np(x: np.ndarray) -> np.ndarray:
     """
     Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format.
@@ -17,33 +19,7 @@ def xywh2xyxy_np(x: np.ndarray) -> np.ndarray:
     y[..., 3] = xy[..., 1] + wh_half[..., 1] # y2
     return y
 
-def clip_boxes_np(boxes: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
-    """Clip bounding boxes to image boundaries (Numpy version)."""
-    h, w = shape[:2]
-    boxes[..., [0, 2]] = np.clip(boxes[..., [0, 2]], 0, w)  # x1, x2
-    boxes[..., [1, 3]] = np.clip(boxes[..., [1, 3]], 0, h)  # y1, y2
-    return boxes
 
-def scale_boxes_np(
-    img1_shape: Tuple[int, int], # (height, width) of the image *after* letterbox
-    boxes: np.ndarray, # Bounding boxes in xyxy format, scaled to img1_shape
-    img0_shape: Tuple[int, int], # (height, width) of the original image
-    ratio_pad: Tuple[Tuple[float, float], Tuple[float, float]], # ((gain_w, gain_h), (pad_x, pad_y))
-    padding: bool = True # Whether boxes are based on YOLO-style augmented images with padding.
-) -> np.ndarray:
-    """Rescale bounding boxes from img1_shape to img0_shape (Numpy version)."""
-    gain, (pad_x, pad_y) = ratio_pad
-
-    if padding:
-        boxes[..., 0] -= pad_x  # x padding
-        boxes[..., 1] -= pad_y  # y padding
-        boxes[..., 2] -= pad_x  # x padding
-        boxes[..., 3] -= pad_y  # y padding
-    
-    # Apply gain (ultralytics applies gain to all 4 coords, this is correct for xyxy)
-    boxes[..., :4] /= gain[0] # Assuming gain_w == gain_h
-
-    return clip_boxes_np(boxes, img0_shape)
 
 def non_max_suppression_np(
     prediction: np.ndarray, # (num_predictions, num_attributes) -> (33600, 7)
@@ -125,9 +101,8 @@ def non_max_suppression_np(
     return [detections] # Wrap in a list for batch_size = 1
 
 
-from PytorchWildlife_Export.postprocessors.base_postprocessor import BasePostProcessor
 
-class YOLOvPostProcessor(BasePostProcessor):
+class YOLOvPostProcessor():
     """
     Custom post-processor for YOLOv8/YOLOv9/YOLOv10 models exported to ONNX (raw output, pre-NMS).
     This class handles converting raw ONNX output (typically [1, 7, N]) into

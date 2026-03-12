@@ -15,15 +15,13 @@ if project_top_level not in sys.path:
 from PytorchWildlife_Export.inference_utils.onnx_inference import ONNXInferenceSession
 from PytorchWildlife_Export.postprocessors.yolov_postprocessor import YOLOvPostProcessor # For YOLOv9 output
 from PytorchWildlife_Export.postprocessors.ultralytics_baseline_utils import get_ultralytics_baseline_detections
-from PytorchWildlife_Export.export_tool import main as export_tool_main # Import the main function of export_tool
+from PytorchWildlife_Export.export_tool import main as export_tool_main, parse_args as export_parse_args
 
 # --- Configuration ---
 SAMPLE_IMAGE_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), 'sample_image.jpg'
 ))
-OUTPUT_DIR = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), 'demo_output'
-))
+OUTPUT_DIR = "/exported_models"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 CONFIDENCE_THRESHOLD = 0.25
@@ -77,20 +75,15 @@ def run_demo():
     print("\n--- Step 1: Export YOLOv9 Model in UINT8 ---")
     
     # Export the YOLOv9 model in UINT8 format
-    export_tool_args_uint8 = [
-        "export_tool.py", # dummy arg for argparse
+    export_tool_main(export_parse_args([
         "--model_type", "yolov9",
         "--model_version", YOLOV9_MODEL_VERSION,
         "--output_path", YOLOV9_UINT8_ONNX_PATH,
-        "--format", "uint8", # Export as UINT8
+        "--format", "uint8",
         "--opset", "18",
         "--simplify",
-        "--input_img_size", str(YOLOV9_INPUT_IMG_SIZE) # 640x640 resolution
-    ]
-    original_sys_argv = sys.argv
-    sys.argv = export_tool_args_uint8 # Set sys.argv for argparse
-    export_tool_main() # Run the export tool
-    sys.argv = original_sys_argv # Restore original sys.argv
+        "--input_img_size", str(YOLOV9_INPUT_IMG_SIZE),
+    ]))
 
     print("\n--- Step 2: Run Inference on the YOLOv9 UINT8 Model ---")
     inference_session_uint8 = ONNXInferenceSession(onnx_model_path=YOLOV9_UINT8_ONNX_PATH)
@@ -114,20 +107,15 @@ def run_demo():
     # Export the original YOLOv9 raw float32 model for baseline if it doesn't exist
     if not os.path.exists(YOLOV9_FLOAT32_ONNX_PATH):
         print(f"Exporting original YOLOv9 raw FLOAT32 model to: {YOLOV9_FLOAT32_ONNX_PATH}")
-        export_tool_args_float32 = [
-            "export_tool.py",
+        export_tool_main(export_parse_args([
             "--model_type", "yolov9",
             "--model_version", YOLOV9_MODEL_VERSION,
             "--output_path", YOLOV9_FLOAT32_ONNX_PATH,
             "--format", "float32",
             "--opset", "18",
             "--simplify",
-            "--input_img_size", str(YOLOV9_INPUT_IMG_SIZE) # Match input size
-        ]
-        original_sys_argv = sys.argv
-        sys.argv = export_tool_args_float32
-        export_tool_main()
-        sys.argv = original_sys_argv
+            "--input_img_size", str(YOLOV9_INPUT_IMG_SIZE),
+        ]))
     else:
         print(f"Using existing original YOLOv9 raw FLOAT32 model: {YOLOV9_FLOAT32_ONNX_PATH}")
 

@@ -11,9 +11,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from model_loaders.yolov9_loader import YoloV9Loader
-from model_loaders.rtdetr_loader import RTDETRLoader
 from model_exporters.yolov9_onnx_exporter import YoloV9ONNXExporter
-from model_exporters.rtdetr_onnx_exporter import RTDETRONNXExporter
 from model_validators.onnx_validator import ONNXModelValidator
 
 class TestModelExporters(unittest.TestCase):
@@ -132,46 +130,6 @@ class TestModelExporters(unittest.TestCase):
     #     )
     #     self.assertTrue(os.path.exists(actual_onnx_path), "ONNX model file for demo should exist.")
     #     print(f"1280x1280 YOLOv9 model exported to: {actual_onnx_path}")
-
-
-    @unittest.skip("Skipping RT-DETR export due to persistent ONNXRuntime loading issues. Model is syntactically valid but fails ONNXRuntime initializer checks.")
-    def test_rtdetr_export_and_validate(self):
-        """
-        Test the RT-DETR model loading, ONNX export, and validation pipeline.
-        """
-        print("\n--- Testing RT-DETR Export and Validate ---")
-        model_name = "MDV6-apa-rtdetr-c"
-        onnx_path = os.path.join(self.output_dir, f"{model_name}.onnx")
-
-        # 1. Load PyTorch Model
-        print(f"Loading PyTorch model: {model_name}...")
-        loader = RTDETRLoader(version=model_name)
-        model_pt = loader.load_model()
-        self.assertIsNotNone(model_pt, "PyTorch model should be loaded.")
-        print("PyTorch model loaded successfully.")
-
-        # 2. Export to ONNX
-        print(f"Exporting PyTorch model to ONNX: {onnx_path}...")
-        exporter = RTDETRONNXExporter()
-        exporter.export(
-            model=model_pt,
-            output_path=onnx_path,
-            opset_version=18, # Explicitly set to 18
-            do_simplify=False, # Temporarily set to False for debugging
-            export_format="float32",
-        )
-        self.assertTrue(os.path.exists(onnx_path), "ONNX model file should exist.")
-        print("Model exported to ONNX successfully.")
-
-        # 3. Validate ONNX Model
-        print(f"Validating ONNX model: {onnx_path}...")
-        validator = ONNXModelValidator(onnx_path)
-        is_loaded = validator.load_model()
-        self.assertTrue(is_loaded, "ONNX model should be loaded by validator.")
-        success, _ = validator.validate_forward_pass()
-        self.assertTrue(success, "ONNX model forward pass should succeed.")
-        print("ONNX model validated successfully.")
-        print(f"ONNX Model Info: {validator.get_model_info()}")
 
 
 if __name__ == '__main__':

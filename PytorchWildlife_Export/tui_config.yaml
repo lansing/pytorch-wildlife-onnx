@@ -1,26 +1,52 @@
 headings:
   model_type: "Select Model Type"
   model_version: "Select Model Version"
+  runtime: "Select Runtime Target"
   output_dir: "Output Directory"
   format: "Select Export Format (Precision)"
   input_img_size: "Input Image Size"
-  opset: "ONNX Opset Version"
-  simplify: "Simplify ONNX Model"
+  denormalized_input: "Denormalized Input (0-255)"
+  nhwc_input: "NHWC Input Layout"
+  uint8_input: "uint8 Input"
+  num_calibration_images: "INT8 Calibration Images"
   run_export: "Run Export"
 
 instructions:
   model_type: "Choose the type of model you want to export."
   model_version: "Choose the specific version of the selected model."
+  runtime: |
+    Choose the inference runtime to target.
+    **ONNX** produces a `.onnx` file compatible with ONNX Runtime.
+    **TensorRT** produces a `.engine` file optimised for NVIDIA GPUs. Requires an NVIDIA GPU and TensorRT to be installed.
   output_dir: "Enter the directory where the exported model will be saved."
   format: |
     Select the precision for the exported model.
-    'int8' is not well supported currently.
   input_img_size: "Enter the input image size for the model (e.g., 640)."
-  opset: "Enter the ONNX opset version to use for the export."
-  simplify: "Enable this to simplify the exported ONNX model using onnx-simplifier."
+  denormalized_input: |
+    If enabled, the model will accept pixel values in the range **0–255**
+    instead of the default **0.0–1.0**. A `/255` normalization layer is inserted
+    at the start of the model. Does not change input dtype on its own.
+  nhwc_input: |
+    If enabled, the model will accept tensors in **NHWC** layout (batch, height,
+    width, channels) instead of the default **NCHW** layout. A transpose op is
+    inserted at the start of the model. The exported input shape changes accordingly.
+  uint8_input: |
+    If enabled, the model's input tensor dtype is changed to **uint8**. A cast to
+    float32 is inserted at the start of the model. Combine with *Allow Denormalized*
+    to accept raw 0-255 uint8 pixel data.
+  num_calibration_images: |
+    Number of images to stream from the calibration dataset for INT8 quantization.
+    Images are sourced from **lucabaggi/animal-wildlife** (90 wildlife species) and
+    cached locally after the first run. 100 images is a good default; more images
+    can marginally improve calibration accuracy.
   run_export: "Review the selected options below and proceed to run the export."
 
 options:
+  runtime:
+    - value: 'onnx'
+      label: 'ONNX — export to .onnx (default)'
+    - value: 'tensorrt'
+      label: 'TensorRT — export to .engine (requires NVIDIA GPU)'
   model_type:
     - value: 'yolov9'
       label: 'YOLOv9'
@@ -51,25 +77,38 @@ options:
       label: 'FP16 (float16)'
     - value: 'int8'
       label: 'INT8 (quantized)'
-  simplify:
-    - value: True
-      label: 'Yes'
+  denormalized_input:
     - value: False
-      label: 'No'
+      label: 'No  — exported model expects 0.0–1.0 input (default)'
+    - value: True
+      label: 'Yes — exported model expects 0–255 input'
+  nhwc_input:
+    - value: False
+      label: 'No  — exported model expects NCHW layout (default)'
+    - value: True
+      label: 'Yes — exported model expects NHWC layout'
+  uint8_input:
+    - value: False
+      label: 'No  — exported model expects float32 input (default)'
+    - value: True
+      label: 'Yes — exported model expects uint8 input'
 
 defaults:
   model_type: 'yolov10_v9_compatible'
   model_version: 'MDV6-yolov10-c'
+  runtime: 'onnx'
   output_dir: 'exported_models'
   format: 'float16'
   input_img_size: 320
-  opset: 18
-  simplify: True
+  denormalized_input: False
+  nhwc_input: False
+  uint8_input: False
+  num_calibration_images: 100
 
 ranges:
   input_img_size:
     min: 128
     max: 1280
-  opset:
-    min: 12
-    max: 22
+  num_calibration_images:
+    min: 50
+    max: 5000
