@@ -98,6 +98,17 @@ def parse_args(argv=None):
         help="Runtime target. Default is 'onnx'.",
     )
     parser.add_argument(
+        "--sparse_weights",
+        action="store_true",
+        help=(
+            "Apply 2:4 magnitude-based structured sparsity to Conv weights before "
+            "quantization and set BuilderFlag::SPARSE_WEIGHTS at TRT engine build time. "
+            "Only produces a speedup on Ampere (CC 8.0+) and later hardware — on Turing "
+            "the engine builds successfully but no sparse kernels are selected. "
+            "Only meaningful with --runtime tensorrt."
+        ),
+    )
+    parser.add_argument(
         "--num_calibration_images",
         type=int,
         default=100,
@@ -189,6 +200,7 @@ def main(args=None):
         num_calibration_images=args.num_calibration_images,
         model_type=args.model_type,
         quant_profile=args.quant_profile,
+        sparse_weights=args.sparse_weights,
     )
 
     if args.model_type in ("yolov9", "yolov10"):

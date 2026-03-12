@@ -129,6 +129,7 @@ class YOLOExporter(ABC):
         num_calibration_images: int = 300,
         model_type: str = "yolov10",
         quant_profile: str = "conv",
+        sparse_weights: bool = False,
         **kwargs,
     ) -> None:
         """Run the full export pipeline.
@@ -153,6 +154,13 @@ class YOLOExporter(ABC):
             quant_profile: INT8 quantization profile.  One of "conv" (default)
                 or "blanket".  See ``_QUANT_PROFILES`` for the node types each
                 profile includes.  Only used when ``export_format="int8"``.
+            sparse_weights: Apply 2:4 magnitude-based structured sparsity to
+                Conv weights before quantization, and set
+                ``BuilderFlag::SPARSE_WEIGHTS`` at TRT engine build time.
+                Only effective on Ampere (CC 8.0+) and later hardware.
+                On Turing the engine builds successfully but no sparse Tensor
+                Core kernels are selected.  Only used when
+                ``runtime="tensorrt"``.
         """
         if runtime not in ("onnx", "tensorrt"):
             raise ValueError(
@@ -171,6 +179,16 @@ class YOLOExporter(ABC):
 
         # ── Step 2: Precision conversion on base model ────────────────────
         base_model = onnx.load(base_onnx_path)
+
+        # ── Step 2a: 2:4 structured sparsity (optional, Ampere+ only) ────
+        if sparse_weights:
+            from .quant import apply_2_4_sparsity_to_model
+            excludes = _get_int8_excludes(model_type)
+            base_model, _sparsity_stats = apply_2_4_sparsity_to_model(
+                base_model,
+                node_types=["Conv"],
+                exclude=excludes,
+            )
 
         if export_format == "int8":
             base_model = self._apply_int8_qdq(
@@ -216,6 +234,7 @@ class YOLOExporter(ABC):
                 precision=export_format if export_format != "uint8" else "float32",
                 fp16_fallback=True,
                 verbose=False,
+                sparse_weights=sparse_weights,
             )
             # Ensure output_path points to the engine (rename if needed)
             if engine_file != output_path:

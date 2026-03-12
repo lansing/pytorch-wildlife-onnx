@@ -680,6 +680,150 @@ def calibrate_conv_nodes_scales(
     return scales
 
 
+def _apply_2_4_sparsity(w: np.ndarray) -> np.ndarray:
+    """
+    Enforce NVIDIA 2:4 structured sparsity on a single weight array.
+
+    The weight is reshaped to [C_out, K] where K = C_in * kH * kW (for Conv)
+    or the trailing product for other shapes.  Within each row, every
+    consecutive group of 4 elements has its 2 smallest-magnitude values
+    zeroed.  If K is not a multiple of 4 the row is zero-padded for
+    grouping, then the padding is discarded before reshaping back.
+
+    The 2:4 pattern is applied in the natural ONNX weight layout
+    [C_out, C_in * kH * kW].  TRT reads ONNX weights in this layout and
+    re-arranges them internally; whether it validates the 2:4 pattern
+    before or after its internal rearrangement is an open question that
+    this experiment is designed to answer.
+
+    Args:
+        w: Float32 weight array of any shape.  First dimension is C_out.
+
+    Returns:
+        Array of the same shape and dtype with 2:4 sparsity enforced.
+    """
+    orig_shape = w.shape
+    rows = w.shape[0]
+    cols = int(np.prod(w.shape[1:]))
+
+    pad = (-cols) % 4  # zero-pad cols to a multiple of 4
+    w2d = w.reshape(rows, cols)
+    if pad:
+        w2d = np.pad(w2d, [(0, 0), (0, pad)])
+
+    grouped = w2d.reshape(rows, -1, 4)           # [rows, groups, 4]
+    magnitudes = np.abs(grouped)
+    # Indices of the 2 smallest magnitudes in each group (ascending order)
+    small_idx = np.argsort(magnitudes, axis=-1)[..., :2]  # [rows, groups, 2]
+    np.put_along_axis(grouped, small_idx, 0.0, axis=-1)
+
+    w2d_pruned = grouped.reshape(rows, -1)[:, :cols]  # strip padding
+    return w2d_pruned.reshape(orig_shape).astype(w.dtype)
+
+
+def apply_2_4_sparsity_to_model(
+    model: onnx.ModelProto,
+    node_types: list = None,
+    exclude: list = None,
+) -> tuple:
+    """
+    Apply 2:4 magnitude-based structured sparsity to Conv weight initializers.
+
+    For each Conv node that is not excluded, the weight tensor is reshaped to
+    [C_out, C_in * kH * kW] and every group of 4 consecutive values in each
+    row has its 2 smallest-magnitude entries zeroed.  This is the pattern
+    required by NVIDIA Ampere sparse Tensor Cores (``BuilderFlag::SPARSE_WEIGHTS``).
+
+    Sparsity is applied to the float32 weights *before* INT8 quantization so
+    that the INT8 scale is computed from the pruned weight distribution (which
+    may have a lower max, giving a finer quantization grid).
+
+    Args:
+        model: Float32 ONNX ModelProto (base export, before QDQ insertion).
+        node_types: Op types whose weights to prune.  Defaults to ``["Conv"]``.
+        exclude: Substrings — any node whose name contains one is skipped.
+            Should match the INT8 exclude list so accuracy-sensitive layers
+            (detection head, attention, 3-channel stem) are left untouched.
+
+    Returns:
+        (modified_model, stats) where stats is a dict
+        ``{node_name: {"shape": [...], "sparsity_before": float,
+                       "sparsity_after": float}}``.
+    """
+    if node_types is None:
+        node_types = ["Conv"]
+    if exclude is None:
+        exclude = []
+
+    init_index = {init.name: i for i, init in enumerate(model.graph.initializer)}
+    new_inits = list(model.graph.initializer)
+
+    stats = {}
+    nodes_pruned = 0
+    total_weights = 0
+    total_newly_zeroed = 0
+
+    for node in model.graph.node:
+        if node.op_type not in node_types:
+            continue
+        if any(ex in node.name for ex in exclude):
+            continue
+        if node.op_type != "Conv" or len(node.input) < 2:
+            continue
+
+        weight_name = node.input[1]
+        if weight_name not in init_index:
+            continue  # weight not a static initializer — skip
+
+        idx = init_index[weight_name]
+        w_orig = onh.to_array(model.graph.initializer[idx]).astype(np.float32)
+        w_pruned = _apply_2_4_sparsity(w_orig)
+
+        n_zero_before = int(np.sum(w_orig == 0.0))
+        n_zero_after = int(np.sum(w_pruned == 0.0))
+        size = w_orig.size
+
+        stats[node.name] = {
+            "shape": list(w_orig.shape),
+            "sparsity_before": n_zero_before / size,
+            "sparsity_after": n_zero_after / size,
+        }
+        total_weights += size
+        total_newly_zeroed += n_zero_after - n_zero_before
+        nodes_pruned += 1
+
+        new_inits[idx] = onh.from_array(w_pruned, name=weight_name)
+        LOGGER.debug(
+            f"  {node.name}: {list(w_orig.shape)} "
+            f"sparsity {100*n_zero_before/size:.1f}% → {100*n_zero_after/size:.1f}%"
+        )
+
+    new_graph = oh.make_graph(
+        list(model.graph.node),
+        model.graph.name,
+        list(model.graph.input),
+        list(model.graph.output),
+        new_inits,
+    )
+    new_model = oh.make_model(new_graph, opset_imports=model.opset_import)
+    new_model.ir_version = model.ir_version
+
+    total_zero_after = sum(
+        int(s["sparsity_after"] * int(np.prod(s["shape"]))) for s in stats.values()
+    )
+    sparsity_pct = 100.0 * total_zero_after / total_weights if total_weights else 0.0
+    print(
+        f"2:4 sparsity applied to {nodes_pruned} Conv nodes "
+        f"({total_weights:,} weights total)."
+    )
+    print(
+        f"  Newly zeroed: {total_newly_zeroed:,}  "
+        f"Overall weight sparsity: {sparsity_pct:.1f}%  (target: 50.0%)"
+    )
+
+    return new_model, stats
+
+
 def wrap_nodes_in_int8_qdq(
     model: onnx.ModelProto,
     calibration_loader,

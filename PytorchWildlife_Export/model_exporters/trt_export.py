@@ -42,6 +42,7 @@ def onnx2engine(
     precision: str = "float32",
     fp16_fallback: bool = True,
     verbose: bool = False,
+    sparse_weights: bool = False,
 ) -> str:
     """Build a TensorRT engine from an ONNX file.
 
@@ -69,6 +70,12 @@ def onnx2engine(
         fp16_fallback: For precision="int8", allow FP16 for layers without
             INT8 Q/DQ coverage.  Ignored for other precisions.
         verbose: Enable TRT VERBOSE logging.
+        sparse_weights: Set BuilderFlag.SPARSE_WEIGHTS so TRT selects sparse
+            Tensor Core kernels for layers whose weight initializers satisfy
+            the 2:4 structured-sparsity pattern.  Layers that do not satisfy
+            the pattern fall back to dense kernels silently.  Requires Ampere
+            or later hardware for any speedup; on Turing the engine builds
+            successfully but no sparse kernels are selected.
 
     Returns:
         Absolute path of the written engine file.
@@ -112,6 +119,17 @@ def onnx2engine(
         config.set_flag(trt.BuilderFlag.INT8)
         if fp16_fallback and builder.platform_has_fast_fp16:
             config.set_flag(trt.BuilderFlag.FP16)
+
+    # 2:4 structured sparsity — TRT selects sparse Tensor Core kernels for
+    # Conv/Linear layers whose weights satisfy the 2:4 pattern.  No-op on
+    # Turing (CC 7.5); effective on Ampere (CC 8.0+) and later.
+    if sparse_weights:
+        if hasattr(trt.BuilderFlag, "SPARSE_WEIGHTS"):
+            config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
+            print("  Sparse weights enabled (BuilderFlag.SPARSE_WEIGHTS).")
+        else:
+            print("  WARNING: BuilderFlag.SPARSE_WEIGHTS not available in this "
+                  "TRT version — sparse flag ignored.")
 
     # Detailed per-layer profiling (accessible via trtexec --profilingVerbosity)
     config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
