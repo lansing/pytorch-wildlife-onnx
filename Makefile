@@ -1,7 +1,7 @@
 .PHONY: install uninstall clean test lint export demo \
         dataset-download-wcs-test dataset-download-coco-test dataset-build-test \
-        dataset-build eval-baseline eval sweep-export sweep-eval \
-        train-qat
+        dataset-build eval-baseline eval eval-ood sweep-export sweep-eval \
+        train-qat dataset-download-cct-ood
 
 PYTHON_VERSION = 3.11.8
 VENV_DIR = .venv
@@ -304,6 +304,45 @@ sweep-eval:
 		$(if $(SWEEP_EVAL_RUNTIMES), --runtimes $(SWEEP_EVAL_RUNTIMES)) \
 		$(if $(SWEEP_EVAL_OUT),      --out      $(SWEEP_EVAL_OUT)) \
 		$(SWEEP_EVAL_VERBOSE)
+
+## dataset-download-cct-ood
+##   Download ~500 Caltech Camera Traps (CCT20) images for OOD evaluation.
+##   SW USA wildlife — completely different from WCS training data.
+##   ~200–350 MB download.  Requires no authentication.
+##
+##   Optional overrides:
+##     CCT_MAX_ANIMAL=500      number of animal images to download
+##     CCT_OUTPUT_DIR=/data/cct_ood
+##
+CCT_MAX_ANIMAL  ?= 500
+CCT_OUTPUT_DIR  ?= /data/cct_ood
+
+dataset-download-cct-ood:
+	@mkdir -p data/cct_ood cache/cct
+	@echo "--- Downloading CCT OOD validation set ($(CCT_MAX_ANIMAL) images) ---"
+	$(DOCKER_RUN) \
+		-m PytorchWildlife_Export.dataset.cct_downloader \
+		--output-dir $(CCT_OUTPUT_DIR) \
+		--max-animal $(CCT_MAX_ANIMAL) \
+		--log-level INFO
+
+## eval-ood MODEL=<filename>
+##   Evaluate any model in exported_models/ against the CCT OOD validation set.
+##   MODEL can be a .engine or .onnx file (filename only, no path).
+##
+##   Examples:
+##     make eval-ood MODEL=MDV6-yolov10-c_int8_640_denorm_nhwc_uint8input.engine
+##     make eval-ood MODEL=MDV6-yolov10-c_qat_int8_640_denorm_nhwc_uint8input.engine
+##
+eval-ood:
+	@echo "--- OOD eval (CCT): $(MODEL) ---"
+	$(DOCKER_RUN) \
+		-m PytorchWildlife_Export.dataset.eval \
+		$(CONTAINER_MODELS_DIR)/$(MODEL) \
+		--dataset /data/cct_ood/cct_ood.yaml \
+		--split val \
+		--conf $(CONF) \
+		--log-level INFO
 
 ## train-qat
 ##   Run QAT fine-tuning inside Docker.

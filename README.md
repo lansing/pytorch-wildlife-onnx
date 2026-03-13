@@ -132,6 +132,16 @@ The INT8 export is not a generic ONNX quantization pass. The quantized node sele
 - **Sensitivity-aware exclusions:** Certain layers are deliberately excluded from INT8 quantization. The input stem (`model.0`) is excluded because its 3-channel RGB input falls outside the INT8 Tensor Core path on most NVIDIA hardware. The detection head (`model.23`) is excluded because its output scales are sensitive to quantization noise in a way that affects NMS thresholding; keeping it in FP16 preserves detection accuracy at negligible throughput cost.
 - **Float32 bias preservation:** Conv biases are kept as float32 inside the Conv node rather than being folded into a separate post-dequantize Add. This is required for TRT to apply the Conv+SiLU epilogue fusion.
 
+### Want to catch them all?
+
+To export the full collection of MDV6-yolov10 variants (both model sizes × all supported input resolutions × float16 and INT8 × ONNX and TensorRT) in a single command:
+
+```bash
+make sweep-export
+```
+
+This produces up to 12 artifacts — four float16 ONNX files, four float16 TRT engines, and four INT8 TRT engines — all with the recommended `uint8+NHWC+denorm` preprocessing baked in.  Run `make sweep-export SWEEP_DRY_RUN=--dry-run` first to preview filenames without downloading anything.  To evaluate all exported models at once, follow up with `make sweep-eval` (see [README_DATA.md](README_DATA.md) for details).
+
 ### TensorRT is required for full benefit
 
 The INT8 ONNX export contains explicit QDQ nodes that encode the per-layer calibration scales. The speedup described above is only realised when using a runtime that understands and can execute these nodes as INT8 kernels:
