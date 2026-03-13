@@ -1,8 +1,10 @@
-import argparse  # Added argparse
+import argparse
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+from PytorchWildlife_Export.naming import build_output_filename
 
 import yaml
 from textual import events
@@ -244,20 +246,16 @@ class SummaryScreen(Screen):
 
     def get_output_path(self) -> str:
         selections = self.app.selections
-        filename_base = (
-            f"{selections['model_version']}_{selections['format']}_"
-            + f"{selections['input_img_size']}"
+        filename = build_output_filename(
+            model_version=selections["model_version"],
+            format=selections["format"],
+            input_img_size=selections["input_img_size"],
+            model_type=selections["model_type"],
+            denormalized_input=bool(selections.get("denormalized_input")),
+            nhwc_input=bool(selections.get("nhwc_input")),
+            uint8_input=bool(selections.get("uint8_input")),
+            runtime=selections.get("runtime", "onnx"),
         )
-        if selections["model_type"] == "yolov10_v9_compatible":
-            filename_base += "_v9_compat"
-        if selections.get("denormalized_input"):
-            filename_base += "_denorm"
-        if selections.get("nhwc_input"):
-            filename_base += "_nhwc"
-        if selections.get("uint8_input"):
-            filename_base += "_uint8input"
-        ext = ".engine" if selections.get("runtime") == "tensorrt" else ".onnx"
-        filename = f"{filename_base}{ext}"
         return os.path.join(selections["output_dir"], filename)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

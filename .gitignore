@@ -57,3 +57,13 @@ checkpoints/
 
 sample_models/
 TODO.md
+
+# Dataset — images and labels are large and machine-generated
+data/
+# Keep the cache dir (WCS annotation zip/json) out of the repo
+cache/
+
+# Scratch / scratch files
+crap/
+info_*.txt
+onnxruntime_profile__*.json

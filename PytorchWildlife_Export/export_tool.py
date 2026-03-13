@@ -18,6 +18,9 @@ from PytorchWildlife_Export.model_exporters.yolov10_v9_compatible_exporter impor
 from PytorchWildlife_Export.model_loaders.yolov9_loader import YoloV9Loader
 
 
+from PytorchWildlife_Export.naming import build_output_filename  # noqa: F401 (re-exported)
+
+
 def parse_args(argv=None):
     """Parse export_tool arguments from *argv* (list of strings) or sys.argv if None."""
     parser = argparse.ArgumentParser(
