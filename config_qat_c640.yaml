@@ -1,0 +1,31 @@
+# config_qat_c640.yaml
+# QAT fine-tuning config for MDV6-yolov10-c at 640px.
+
+model:
+  version: "MDV6-yolov10-c"
+  weights: null
+
+data:
+  dataset_yaml: "/data/md_ft/megadetector_ft.yaml"
+  imgsz: 640
+  batch_size: 8
+  workers: 4
+
+quant:
+  exclude_stem: true
+  exclude_head: true
+  calib_batches: 16
+
+train:
+  epochs: 10
+  lr: 1.0e-4
+  lr_min: 1.0e-6
+  weight_decay: 1.0e-4
+  grad_clip: 10.0
+  log_interval: 50
+  val_batches: 50
+
+output:
+  checkpoint_dir: "/app/checkpoints/qat_c640"
+  weights_path: "/app/checkpoints/qat_c640/MDV6-yolov10-c_qat_finetuned.pt"
+  scales_json:  "/app/checkpoints/qat_c640/MDV6-yolov10-c_qat_scales.json"

@@ -349,8 +349,8 @@ def main(argv=None):
     )
     val_loader = build_md_dataloader(
         dataset_yaml, split="val", imgsz=imgsz,
-        batch_size=batch_size, workers=workers, augment=False,
-    )
+        batch_size=batch_size, workers=0, augment=False,
+    )  # workers=0: avoid multiprocessing deadlock when breaking mid-iteration
     LOGGER.info("Train batches: %d  |  Val batches: %d", len(train_loader), len(val_loader))
 
     # -----------------------------------------------------------------------
@@ -383,6 +383,14 @@ def main(argv=None):
             # Calibration ran with head excluded; now re-enable for QAT
             LOGGER.info("Full-INT8 mode: re-enabling head quantizers for QAT.")
             enable_head_quantizers(detection_model)
+
+    # ModelOpt's mtq.quantize / calibration may move the model to CPU internally
+    # and lazily initialize detection_model.criterion there, leaving criterion.proj
+    # on CPU.  Restore model to target device and drop any stale criterion so it
+    # re-initializes on CUDA at the first real training step.
+    detection_model.to(device)
+    if hasattr(detection_model, "criterion"):
+        del detection_model.criterion
 
     # -----------------------------------------------------------------------
     # Optimizer

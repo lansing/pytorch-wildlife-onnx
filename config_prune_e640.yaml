@@ -1,0 +1,54 @@
+# config_prune_c640.yaml
+# ----------------------
+# FastNAS structured channel pruning + fine-tuning for MDV6-yolov10-c at 640px.
+#
+# Usage (via Make — runs inside Docker with modelopt installed):
+#   make train-prune
+#   make train-prune PRUNE_EPOCHS=20
+#
+# Then export the pruned model:
+#   make export-pruned
+#
+# Direct invocation:
+#   python -m PytorchWildlife_Export.finetune.prune_train --config config_prune_c640.yaml
+
+model:
+    version: "MDV6-yolov10-e"
+    weights: null # null = hub download; or an explicit local .pt path
+
+data:
+    dataset_yaml: "/data/md_ft/megadetector_ft.yaml"
+    imgsz: 640
+    batch_size: 4
+    workers: 4
+
+prune:
+    # Target FLOPs fraction *remaining* after pruning.
+    # 0.50 = keep 50% of original FLOPs (2× FLOPs reduction).
+    # Start with 0.50; if mAP recovery is good, try 0.35 for more compression.
+    flops_fraction: 0.50
+
+    # Output channel alignment for Tensor Core efficiency.
+    # 8 is a safe default for Turing/Ampere; increase to 16 on Hopper.
+    channel_divisor: 8
+
+    # Number of validation batches used by the FastNAS score function per
+    # candidate evaluation.  Fewer batches = faster search, noisier score.
+    # 4 batches × 8 images = 32 images — sufficient for relative ranking.
+    score_batches: 4
+
+train:
+    # Fine-tuning epochs after slicing.  The plan recommends 50–100 epochs.
+    # Increase if mAP has not converged.
+    epochs: 60
+
+    lr: 5.0e-5 # lower than QAT; pruned model needs gentle fine-tuning
+    lr_min: 1.0e-6
+    weight_decay: 1.0e-4
+    grad_clip: 10.0
+    log_interval: 50
+    val_batches: 50 # max val batches per epoch (0 = full val set)
+
+output:
+    checkpoint_dir: "/app/checkpoints/prune_c640"
+    onnx_path: "/app/checkpoints/prune_c640/MDV6-yolov10-e_pruned.onnx"

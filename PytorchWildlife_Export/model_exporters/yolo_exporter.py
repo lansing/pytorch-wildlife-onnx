@@ -130,6 +130,7 @@ class YOLOExporter(ABC):
         model_type: str = "yolov10",
         quant_profile: str = "conv",
         precomputed_scales: dict | None = None,
+        onnx_path_override: str | None = None,
         **kwargs,
     ) -> None:
         """Run the full export pipeline.
@@ -154,6 +155,13 @@ class YOLOExporter(ABC):
             quant_profile: INT8 quantization profile.  One of "conv" (default)
                 or "blanket".  See ``_QUANT_PROFILES`` for the node types each
                 profile includes.  Only used when ``export_format="int8"``.
+            onnx_path_override: Path to a pre-built float32 ONNX file.  When
+                set, the torch → ONNX export step and the subclass
+                ``do_your_merges`` step are both skipped; the provided ONNX is
+                used directly as the base model.  Use this to supply the ONNX
+                produced by ``prune_train.py`` (structurally modified model
+                that cannot be re-exported via the standard Ultralytics path).
+                ``model`` may be ``None`` when this option is set.
         """
         if runtime not in ("onnx", "tensorrt"):
             raise ValueError(
@@ -165,10 +173,14 @@ class YOLOExporter(ABC):
             self._ensure_tensorrt()
 
         # ── Step 1: Export base YOLO to float32 ONNX ─────────────────────
-        base_onnx_path = self._export_base_onnx(
-            model, output_path, input_shape, opset_version, do_simplify
-        )
-        LOGGER.info(f"Base ONNX exported to: {base_onnx_path}")
+        if onnx_path_override:
+            base_onnx_path = onnx_path_override
+            LOGGER.info(f"Using pre-built ONNX override: {base_onnx_path}")
+        else:
+            base_onnx_path = self._export_base_onnx(
+                model, output_path, input_shape, opset_version, do_simplify
+            )
+            LOGGER.info(f"Base ONNX exported to: {base_onnx_path}")
 
         # ── Step 2: Precision conversion on base model ────────────────────
         base_model = onnx.load(base_onnx_path)
@@ -184,10 +196,18 @@ class YOLOExporter(ABC):
             )
 
         # ── Step 3: Subclass-specific output merges ───────────────────────
-        yolo_output_shape = model.model(torch.zeros(input_shape))[0].shape
-        merged_model = self.do_your_merges(
-            yolo_output_shape, base_model, num_classes, opset_version
-        )
+        # Skipped when onnx_path_override is set: the override ONNX is already
+        # the complete model (pruned backbone + original head), so no format
+        # adapter is needed.  The do_your_merges() call also requires running a
+        # forward pass through the PyTorch model to get the output shape, which
+        # is not possible when model is None.
+        if onnx_path_override:
+            merged_model = base_model
+        else:
+            yolo_output_shape = model.model(torch.zeros(input_shape))[0].shape
+            merged_model = self.do_your_merges(
+                yolo_output_shape, base_model, num_classes, opset_version
+            )
 
         # ── Step 4: Input preprocessing wrapper ──────────────────────────
         merged_model, final_input_shape = self.add_preprocessing(

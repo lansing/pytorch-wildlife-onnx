@@ -6,6 +6,13 @@ def merge_onnx_models(m_1, m_2, prefix1, prefix2):
     if isinstance(m_2, str):
         m_2 = onnx.load(m_2)
 
+    # Normalize IR versions — onnx.compose.merge_models requires both models to
+    # have the same IR version.  torch.onnx.export emits IR v8 while our
+    # preprocessing graphs use IR v10; take the higher of the two.
+    ir_version = max(m_1.ir_version, m_2.ir_version)
+    m_1.ir_version = ir_version
+    m_2.ir_version = ir_version
+
     # assumes that we only have one of these inputs/outputs! should work ok for YOLO
     m_1_output_name = [node.name for node in m_1.graph.output][0]
     m_2_input_name = [node.name for node in m_2.graph.input][0]

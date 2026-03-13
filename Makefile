@@ -1,7 +1,7 @@
 .PHONY: install uninstall clean test lint export demo \
         dataset-download-wcs-test dataset-download-coco-test dataset-build-test \
         dataset-build eval-baseline eval eval-ood sweep-export sweep-eval \
-        train-qat dataset-download-cct-ood
+        train-qat train-prune export-pruned eval-pruned dataset-download-cct-ood
 
 PYTHON_VERSION = 3.11.8
 VENV_DIR = .venv
@@ -208,14 +208,19 @@ eval-baseline:
 ## eval MODEL=<filename>
 ##   Evaluate any model in exported_models/ against the val split.
 ##   MODEL can be a .engine or .onnx file (filename only, no path).
-##   Optional: SPLIT=test  CONF=0.1
+##   Optional: SPLIT=test  CONF=0.1  CSV=path/to/results.csv
+##
+##   Appends one row to exported_models/eval_results_<SPLIT>.csv by default.
+##   Pass CSV= to override the output file, or CSV=none to suppress.
 ##
 ##   Examples:
 ##     make eval MODEL=MDV6-yolov10-e_int8_640_denorm_nhwc_uint8input.engine
 ##     make eval MODEL=MDV6-yolov10-e_float32_1280_raw.onnx SPLIT=test
+##     make eval MODEL=my_pruned.engine CSV=none
 MODEL ?= $(BASELINE_ENGINE)
 SPLIT ?= val
 CONF  ?= 0.1
+CSV   ?= $(CONTAINER_MODELS_DIR)/eval_results_$(SPLIT).csv
 eval:
 	@echo "--- Evaluating: $(MODEL) (split=$(SPLIT), conf=$(CONF)) ---"
 	$(DOCKER_RUN) \
@@ -224,7 +229,8 @@ eval:
 		--dataset $(CONTAINER_DATA_DIR)/megadetector_ft.yaml \
 		--split $(SPLIT) \
 		--conf $(CONF) \
-		--log-level INFO
+		--log-level INFO \
+		$(if $(filter-out none,$(CSV)),--csv $(CSV),)
 
 ## sweep-export
 ##   Export all standard MDV6-yolov10 variants (e/c × 640/320 × float16/int8 × onnx/trt).
@@ -305,6 +311,95 @@ sweep-eval:
 		$(if $(SWEEP_EVAL_OUT),      --out      $(SWEEP_EVAL_OUT)) \
 		$(SWEEP_EVAL_VERBOSE)
 
+## train-prune
+##   FastNAS structured channel pruning + fine-tuning via NVIDIA ModelOpt.
+##   Installs modelopt at runtime, prunes the model to the target FLOPs fraction,
+##   fine-tunes to recover mAP, and exports a pruned float32 ONNX.
+##
+##   Optional overrides:
+##     PRUNE_CONFIG=/app/config_prune_c640.yaml
+##     PRUNE_EPOCHS=60          override fine-tuning epochs from config
+##     PRUNE_SKIP=--skip-prune  skip search and resume fine-tuning from latest checkpoint
+##
+##   Examples:
+##     make train-prune
+##     make train-prune PRUNE_EPOCHS=20          # quick test run
+##     make train-prune PRUNE_SKIP=--skip-prune  # resume fine-tuning only
+##
+PRUNE_CONFIG ?= /app/config_prune_c640.yaml
+PRUNE_EPOCHS ?=
+PRUNE_SKIP   ?=
+
+train-prune:
+	@echo "--- FastNAS channel pruning + fine-tuning (config=$(PRUNE_CONFIG)) ---"
+	docker run --runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all --rm \
+		--network host \
+		-v "$(CURDIR)/data:/data" \
+		-v "$(CURDIR)/exported_models:$(CONTAINER_MODELS_DIR)" \
+		-v "$(CURDIR)/cache:$(CONTAINER_CACHE_DIR)" \
+		-v "$(CURDIR):/app" \
+		-v "$(CURDIR)/checkpoints:/app/checkpoints" \
+		--workdir /app \
+		--shm-size=4g \
+		--entrypoint bash \
+		$(IMAGE_TRT) \
+		-c "pip install torch-pruning -q && python3 \
+		    -m PytorchWildlife_Export.finetune.prune_train \
+		    --config $(PRUNE_CONFIG) \
+		    $(if $(PRUNE_EPOCHS), --epochs $(PRUNE_EPOCHS)) \
+		    $(PRUNE_SKIP) \
+		    --log-level INFO"
+
+## export-pruned
+##   Compile the pruned ONNX produced by train-prune into a float16 TRT engine
+##   with full baked-in preprocessing (uint8 + NHWC + denorm).
+##
+##   Optional overrides:
+##     PRUNED_ONNX=/app/checkpoints/prune_c640/MDV6-yolov10-c_pruned.onnx
+##     PRUNED_MODEL_VERSION=MDV6-yolov10-c
+##     PRUNED_FORMAT=float16          (or int8 — combines with --onnx-override)
+##     PRUNED_OUTPUT=/exported_models/MDV6-yolov10-c_pruned_float16_640_denorm_nhwc_uint8input.engine
+##
+PRUNED_ONNX          ?= /app/checkpoints/prune_c640/MDV6-yolov10-c_pruned.onnx
+PRUNED_MODEL_VERSION ?= MDV6-yolov10-c
+PRUNED_FORMAT        ?= float16
+PRUNED_OUTPUT        ?= $(CONTAINER_MODELS_DIR)/MDV6-yolov10-c_pruned_$(PRUNED_FORMAT)_640_denorm_nhwc_uint8input.engine
+
+export-pruned:
+	@echo "--- Exporting pruned model: $(PRUNED_ONNX) → $(PRUNED_OUTPUT) ---"
+	$(DOCKER_RUN) \
+		-m PytorchWildlife_Export.export_tool \
+		--model_type yolov10 \
+		--model_version $(PRUNED_MODEL_VERSION) \
+		--onnx-override $(PRUNED_ONNX) \
+		--format $(PRUNED_FORMAT) \
+		--runtime tensorrt \
+		--uint8_input --nhwc_input --denormalized_input \
+		--output_path $(PRUNED_OUTPUT)
+
+## eval-pruned
+##   Evaluate the pruned TRT engine on both in-distribution val and OOD (CCT).
+##   Results are appended to exported_models/eval_results_val.csv and
+##   exported_models/eval_results_ood.csv for later comparison.
+##
+PRUNED_ENGINE ?= MDV6-yolov10-c_pruned_float16_640_denorm_nhwc_uint8input.engine
+
+eval-pruned:
+	@echo "--- In-distribution eval: $(PRUNED_ENGINE) ---"
+	$(DOCKER_RUN) \
+		-m PytorchWildlife_Export.dataset.eval \
+		$(CONTAINER_MODELS_DIR)/$(PRUNED_ENGINE) \
+		--dataset $(CONTAINER_DATA_DIR)/megadetector_ft.yaml \
+		--split val --conf $(CONF) --log-level INFO \
+		--csv $(CONTAINER_MODELS_DIR)/eval_results_val.csv
+	@echo "--- OOD eval (CCT): $(PRUNED_ENGINE) ---"
+	$(DOCKER_RUN) \
+		-m PytorchWildlife_Export.dataset.eval \
+		$(CONTAINER_MODELS_DIR)/$(PRUNED_ENGINE) \
+		--dataset /data/cct_ood/cct_ood.yaml \
+		--split val --conf $(CONF) --log-level INFO \
+		--csv $(CONTAINER_MODELS_DIR)/eval_results_ood.csv
+
 ## dataset-download-cct-ood
 ##   Download ~500 Caltech Camera Traps (CCT20) images for OOD evaluation.
 ##   SW USA wildlife — completely different from WCS training data.
@@ -366,14 +461,24 @@ QAT_RESUME      ?=
 
 train-qat:
 	@echo "--- QAT fine-tuning (config=$(CONFIG)) ---"
-	$(DOCKER_RUN) \
+	docker run --runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all --rm \
+		--network host \
+		-v "$(CURDIR)/data:/data" \
+		-v "$(CURDIR)/exported_models:$(CONTAINER_MODELS_DIR)" \
+		-v "$(CURDIR)/cache:$(CONTAINER_CACHE_DIR)" \
+		-v "$(CURDIR):/app" \
 		-v "$(CURDIR)/checkpoints:/app/checkpoints" \
-		-m PytorchWildlife_Export.finetune.qat_train \
-		--config $(CONFIG) \
-		$(if $(QAT_EPOCHS),   --epochs $(QAT_EPOCHS)) \
-		$(if $(QAT_FULL_INT8), $(QAT_FULL_INT8)) \
-		$(if $(QAT_RESUME),   --resume $(QAT_RESUME)) \
-		--log-level INFO
+		--workdir /app \
+		--shm-size=4g \
+		--entrypoint bash \
+		$(IMAGE_TRT) \
+		-c "pip install 'nvidia-modelopt[torch]>=0.21' -q && python3 \
+		    -m PytorchWildlife_Export.finetune.qat_train \
+		    --config $(CONFIG) \
+		    $(if $(QAT_EPOCHS),    --epochs $(QAT_EPOCHS)) \
+		    $(if $(QAT_FULL_INT8), $(QAT_FULL_INT8)) \
+		    $(if $(QAT_RESUME),    --resume $(QAT_RESUME)) \
+		    --log-level INFO"
 
 # Default target
 all: install test

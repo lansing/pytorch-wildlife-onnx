@@ -147,6 +147,21 @@ def parse_args(argv=None):
             "config has no output quantizers)."
         ),
     )
+    parser.add_argument(
+        "--onnx-override",
+        type=str,
+        default=None,
+        dest="onnx_override",
+        help=(
+            "Path to a pre-built float32 ONNX file.  When set, the PyTorch model "
+            "export step is skipped and this ONNX is used directly as the base "
+            "graph.  Intended for structurally-modified models such as those "
+            "produced by prune_train.py (FastNAS channel pruning) whose "
+            "architecture cannot be re-exported through the standard Ultralytics "
+            "path.  --model_version is still required for naming/logging.  "
+            "--model_type should be 'yolov10' or 'yolov9'."
+        ),
+    )
 
     return parser.parse_args(argv)
 
@@ -177,21 +192,29 @@ def main(args=None):
             precomputed_scales = json.load(f)
         print(f"Loaded QAT scales for {len(precomputed_scales)} nodes from {args.scales_json}")
 
-    # --- Load Model ---
-    model_loader = None
-    if args.model_type in ("yolov9", "yolov10", "yolov10_v9_compatible"):
-        model_loader = YoloV9Loader(
-            version=args.model_version,
-            device=args.device,
-            weights=args.weights,
-        )
+    # --- Load Model (skipped when --onnx-override is set) ---
+    model_pt = None
+    if args.onnx_override:
+        if not os.path.isfile(args.onnx_override):
+            print(f"Error: --onnx-override path does not exist: {args.onnx_override}")
+            sys.exit(1)
+        print(f"ONNX override mode: using pre-built ONNX at {args.onnx_override}")
+        print(f"Skipping PyTorch model load for '{args.model_version}'.")
     else:
-        print(f"Error: Unsupported model_type '{args.model_type}'.")
-        sys.exit(1)
+        model_loader = None
+        if args.model_type in ("yolov9", "yolov10", "yolov10_v9_compatible"):
+            model_loader = YoloV9Loader(
+                version=args.model_version,
+                device=args.device,
+                weights=args.weights,
+            )
+        else:
+            print(f"Error: Unsupported model_type '{args.model_type}'.")
+            sys.exit(1)
 
-    print(f"Loading PyTorch model '{args.model_version}'...")
-    model_pt = model_loader.load_model()
-    print("PyTorch model loaded successfully.")
+        print(f"Loading PyTorch model '{args.model_version}'...")
+        model_pt = model_loader.load_model()
+        print("PyTorch model loaded successfully.")
 
     # --- Determine Input Shape (NCHW, as the inner model expects) ---
     input_shape = None
@@ -211,7 +234,11 @@ def main(args=None):
     exported_path = args.output_path
     os.makedirs(os.path.dirname(exported_path), exist_ok=True)
 
-    num_classes = len(model_pt.model.names) if hasattr(model_pt.model, "names") else 3
+    num_classes = (
+        len(model_pt.model.names)
+        if model_pt is not None and hasattr(model_pt.model, "names")
+        else 3  # MDV6 always has 3 classes; also the fallback when onnx_override is set
+    )
     export_kwargs = dict(
         model=model_pt,
         output_path=args.output_path,
@@ -228,6 +255,7 @@ def main(args=None):
         model_type=args.model_type,
         quant_profile=args.quant_profile,
         precomputed_scales=precomputed_scales,
+        onnx_path_override=args.onnx_override,
     )
 
     if args.model_type in ("yolov9", "yolov10"):

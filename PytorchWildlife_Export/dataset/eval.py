@@ -650,6 +650,97 @@ def run_eval(
 
 
 # ---------------------------------------------------------------------------
+# CSV output
+# ---------------------------------------------------------------------------
+
+_CSV_COLUMNS = [
+    "model", "model_version", "format", "size", "runtime", "n_images",
+    "animal_AP50", "animal_AP50_95", "animal_AR50", "animal_AR50_95",
+    "person_AP50", "person_AP50_95", "person_AR50", "person_AR50_95",
+    "vehicle_AP50", "vehicle_AP50_95", "vehicle_AR50", "vehicle_AR50_95",
+    "mAP50", "mAP50_95", "mAR50", "mAR50_95",
+]
+
+_CLASS_ORDER = ["animal", "person", "vehicle"]
+
+
+def _parse_model_filename(model_path: str) -> dict:
+    """Extract model_version / format / size / runtime from a model filename.
+
+    Handles names like:
+      MDV6-yolov10-c_float16_640_denorm_nhwc_uint8input.engine
+      MDV6-yolov10-c_pruned_float16_640_denorm_nhwc_uint8input.engine
+      MDV6-yolov10-e_int8_320_denorm_nhwc_uint8input.onnx
+    """
+    import re
+    stem = Path(model_path).stem            # drop .engine / .onnx
+    suffix = Path(model_path).suffix        # .engine or .onnx
+
+    runtime = "tensorrt" if suffix == ".engine" else "onnx"
+
+    # format: first token that is "float16", "float32", or "int8"
+    fmt_match = re.search(r"(float32|float16|int8)", stem)
+    fmt = fmt_match.group(1) if fmt_match else "unknown"
+
+    # size: first standalone integer (e.g. 640, 320, 1280)
+    size_match = re.search(r"_(\d{3,4})(?:_|$)", stem)
+    size = int(size_match.group(1)) if size_match else 0
+
+    # model_version: everything before the first _float / _int / _uint / _denorm token
+    ver_match = re.match(r"^(.*?)(?:_(?:float|int|uint|denorm))", stem)
+    model_version = ver_match.group(1) if ver_match else stem
+
+    return {
+        "model": Path(model_path).name,
+        "model_version": model_version,
+        "format": fmt,
+        "size": size,
+        "runtime": runtime,
+    }
+
+
+def write_csv_row(results: dict, csv_path: str) -> None:
+    """Append a single eval result row to a CSV file (creates with header if new).
+
+    The row format matches exported_models/eval_results_val.csv so results
+    from different runs can be concatenated and compared directly.
+    """
+    import csv
+
+    meta = _parse_model_filename(results["model_path"])
+    per_class = results.get("per_class", {})
+
+    row: dict = {
+        "model":         meta["model"],
+        "model_version": meta["model_version"],
+        "format":        meta["format"],
+        "size":          meta["size"],
+        "runtime":       meta["runtime"],
+        "n_images":      results["n_images"],
+        "mAP50":         round(results["mAP50"],    4),
+        "mAP50_95":      round(results["mAP50_95"], 4),
+        "mAR50":         round(results["mAR50"],    4),
+        "mAR50_95":      round(results["mAR50_95"], 4),
+    }
+    for cls in _CLASS_ORDER:
+        stats = per_class.get(cls, {})
+        row[f"{cls}_AP50"]    = round(stats.get("AP50",    0.0), 4)
+        row[f"{cls}_AP50_95"] = round(stats.get("AP50_95", 0.0), 4)
+        row[f"{cls}_AR50"]    = round(stats.get("AR50",    0.0), 4)
+        row[f"{cls}_AR50_95"] = round(stats.get("AR50_95", 0.0), 4)
+
+    csv_path = Path(csv_path)
+    write_header = not csv_path.exists() or csv_path.stat().st_size == 0
+    with open(csv_path, "a", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=_CSV_COLUMNS)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({k: row[k] for k in _CSV_COLUMNS})
+
+    LOGGER.info("Result appended to %s", csv_path)
+
+
+# ---------------------------------------------------------------------------
 # Output formatter
 # ---------------------------------------------------------------------------
 
@@ -720,6 +811,12 @@ def _parse_args() -> argparse.Namespace:
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
+    parser.add_argument(
+        "--csv", metavar="PATH", default=None,
+        help="Append eval results as a single CSV row to PATH (created with header "
+             "if it does not exist).  Format matches exported_models/eval_results_val.csv "
+             "so rows from multiple runs can be compared side-by-side.",
+    )
     return parser.parse_args()
 
 
@@ -736,7 +833,7 @@ if __name__ == "__main__":
     if _proj_root not in sys.path:
         sys.path.insert(0, _proj_root)
 
-    run_eval(
+    results = run_eval(
         model_path=args.model_path,
         dataset_yaml=args.dataset,
         split=args.split,
@@ -745,3 +842,6 @@ if __name__ == "__main__":
         preferred_provider=args.provider,
         max_images=args.max_images,
     )
+
+    if args.csv:
+        write_csv_row(results, args.csv)
