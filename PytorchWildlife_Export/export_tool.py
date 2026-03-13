@@ -124,6 +124,29 @@ def parse_args(argv=None):
             "Only used when --format int8."
         ),
     )
+    parser.add_argument(
+        "--weights",
+        type=str,
+        default=None,
+        help=(
+            "Path to a local .pt weights file.  When set, skips the hub download "
+            "and loads the specified checkpoint directly.  Use this to export "
+            "QAT-finetuned weights saved by qat_train.py."
+        ),
+    )
+    parser.add_argument(
+        "--scales_json",
+        type=str,
+        default=None,
+        help=(
+            "Path to a JSON file containing QAT-learned INT8 scales produced by "
+            "qat_train.py / finetune.quantize.extract_qat_scales().  When provided "
+            "with --format int8, the ORT-calibrated activation input scales are "
+            "replaced by the gradient-optimized QAT scales for each matching node.  "
+            "Output tensor scales still come from ORT calibration (ModelOpt default "
+            "config has no output quantizers)."
+        ),
+    )
 
     return parser.parse_args(argv)
 
@@ -146,10 +169,22 @@ def main(args=None):
     except ValueError:
         pass  # Path is outside the package — allowed.
 
+    # --- Load QAT scales if provided ---
+    precomputed_scales = None
+    if args.scales_json:
+        import json
+        with open(args.scales_json) as f:
+            precomputed_scales = json.load(f)
+        print(f"Loaded QAT scales for {len(precomputed_scales)} nodes from {args.scales_json}")
+
     # --- Load Model ---
     model_loader = None
     if args.model_type in ("yolov9", "yolov10", "yolov10_v9_compatible"):
-        model_loader = YoloV9Loader(version=args.model_version, device=args.device)
+        model_loader = YoloV9Loader(
+            version=args.model_version,
+            device=args.device,
+            weights=args.weights,
+        )
     else:
         print(f"Error: Unsupported model_type '{args.model_type}'.")
         sys.exit(1)
@@ -192,6 +227,7 @@ def main(args=None):
         num_calibration_images=args.num_calibration_images,
         model_type=args.model_type,
         quant_profile=args.quant_profile,
+        precomputed_scales=precomputed_scales,
     )
 
     if args.model_type in ("yolov9", "yolov10"):

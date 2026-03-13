@@ -687,6 +687,7 @@ def wrap_nodes_in_int8_qdq(
     exclude: list = None,
     max_index: dict = None,
     node_names: list = None,
+    precomputed_scales: dict = None,
 ) -> onnx.ModelProto:
     """
     Calibrates and wraps nodes in INT8 QDQ pairs.
@@ -711,6 +712,14 @@ def wrap_nodes_in_int8_qdq(
             selection; duplicates are silently dropped. Use this to target
             specific high-cost nodes by name (e.g. from profile_analysis
             output) without enabling bulk type-based quantization.
+        precomputed_scales: Optional dict of QAT-learned scales in the format
+            produced by ``finetune.quantize.extract_qat_scales``:
+                {onnx_node_name: {"input_scales": [f, ...], "output_scale": f}}
+            When provided, ORT calibration still runs to obtain output tensor
+            scales (ModelOpt INT8_DEFAULT_CFG has no output quantizers), but the
+            ORT-derived *activation input* scales are replaced by the QAT-learned
+            values for any node present in this dict.  QAT scales are
+            gradient-optimized and therefore more accurate than ORT statistics.
 
     Returns:
         A new ModelProto with the selected nodes wrapped in INT8 QDQ.
@@ -779,6 +788,24 @@ def wrap_nodes_in_int8_qdq(
     scales = calibrate_conv_nodes_scales(
         model, target_names, calibration_loader, silu_map=silu_map
     )
+
+    # Apply QAT-learned scale overrides where available.
+    # ORT output scales are kept as-is (ModelOpt default config has no output
+    # quantizers).  Only activation input scales are overridden — they are
+    # gradient-optimized during QAT and more accurate than ORT statistics.
+    if precomputed_scales:
+        n_overrides = 0
+        for node_name, precomp in precomputed_scales.items():
+            if node_name not in scales:
+                continue
+            ort_in_scales, ort_out_scale = scales[node_name]
+            qat_in_scales = precomp.get("input_scales")
+            qat_out_scale = precomp.get("output_scale")
+            new_in = qat_in_scales if qat_in_scales is not None else ort_in_scales
+            new_out = qat_out_scale if qat_out_scale is not None else ort_out_scale
+            scales[node_name] = (new_in, new_out)
+            n_overrides += 1
+        LOGGER.info("QAT scale overrides applied to %d / %d nodes", n_overrides, len(scales))
 
     result = model
     for node_name in target_names:

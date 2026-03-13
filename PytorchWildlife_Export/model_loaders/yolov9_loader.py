@@ -34,16 +34,25 @@ class YoloV9Loader(BaseModelLoader):
         }
     }
 
-    def __init__(self, version='MDV6-yolov9-c', device="cpu"):
+    def __init__(self, version='MDV6-yolov9-c', device="cpu", weights: str | None = None):
         if version not in self.MODEL_CONFIGS:
             raise ValueError(f"Unsupported YOLOv9 version: {version}. Choose from {list(self.MODEL_CONFIGS.keys())}")
         self.version = version
         self.device = device
+        self.weights = weights  # optional local .pt override (e.g. QAT finetuned)
 
     def load_model(self) -> YOLO:
         """
         Loads the YOLOv9 model directly using ultralytics and returns the ultralytics.YOLO object.
         """
+        if self.weights:
+            # Use explicit local weights (e.g. QAT-finetuned checkpoint)
+            print(f"Loading {self.version} from local weights: {self.weights}")
+            model = YOLO(self.weights)
+            model.to(self.device)
+            print(f"Successfully loaded {self.version} from {self.weights}")
+            return model
+
         config = self.MODEL_CONFIGS[self.version]
         model_url = config['url']
         model_filename = config['model_name']
@@ -65,6 +74,6 @@ class YoloV9Loader(BaseModelLoader):
         model = YOLO(local_weights_path)
         model.to(self.device)
         print(f"Successfully loaded YOLOv9 model (version: {self.version})")
-        
+
         # Return the YOLO object
         return model

@@ -1,0 +1,65 @@
+# config_qat.yaml
+# ----------------
+# Reference configuration for QAT fine-tuning of MDV6-yolov10.
+#
+# Usage:
+#   python -m PytorchWildlife_Export.finetune.qat_train --config config_qat.yaml
+#
+# Inside Docker (via make train-qat):
+#   Paths are container-internal.  Mount the repo at /app and data at /data.
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
+model:
+  version: "MDV6-yolov10-e"   # MDV6-yolov10-e or MDV6-yolov10-c
+  weights: null                # null = PytorchWildlife hub download
+                               # or an explicit .pt path: "/app/weights/MDV6-yolov10-e.pt"
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+data:
+  dataset_yaml: "/data/md_ft/megadetector_ft.yaml"
+  imgsz: 640
+  batch_size: 8
+  workers: 4
+
+# ---------------------------------------------------------------------------
+# Quantization
+# ---------------------------------------------------------------------------
+quant:
+  # Stem (model.0): 3-channel conv — no INT8 Tensor Core path on most GPUs.
+  # Always exclude unless you have a specific reason not to.
+  exclude_stem: true
+
+  # Head (model.23): detection head, sensitive to scale errors.
+  # true  = selective INT8 (recommended starting point)
+  # false = full INT8, requires QAT to recover accuracy (use --full-int8 CLI flag)
+  exclude_head: true
+
+  # Number of training batches used for PTQ calibration (before QAT loop).
+  # 100–200 images is typical; increase for better scale estimates.
+  calib_batches: 16   # 16 batches × 8 images = 128 images
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+train:
+  epochs: 10
+  lr: 1.0e-4          # Initial learning rate (cosine decay)
+  lr_min: 1.0e-6      # Final learning rate at end of schedule
+  weight_decay: 1.0e-4
+  grad_clip: 10.0     # Max gradient norm (0 = disabled)
+  log_interval: 50    # Print train loss every N batches
+  val_batches: 50     # Max validation batches per epoch (0 = full val set)
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+output:
+  checkpoint_dir: "/app/checkpoints"
+  # Finetuned float32 weights (.pt) — feed to export_tool.py via --weights
+  weights_path: "/app/checkpoints/MDV6-yolov10-e_qat_finetuned.pt"
+  # QAT-learned INT8 scales (.json) — feed to export_tool.py via --scales-json
+  scales_json:  "/app/checkpoints/MDV6-yolov10-e_qat_scales.json"

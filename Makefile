@@ -1,6 +1,7 @@
 .PHONY: install uninstall clean test lint export demo \
         dataset-download-wcs-test dataset-download-coco-test dataset-build-test \
-        dataset-build eval-baseline eval sweep-export sweep-eval
+        dataset-build eval-baseline eval sweep-export sweep-eval \
+        train-qat
 
 PYTHON_VERSION = 3.11.8
 VENV_DIR = .venv
@@ -303,6 +304,37 @@ sweep-eval:
 		$(if $(SWEEP_EVAL_RUNTIMES), --runtimes $(SWEEP_EVAL_RUNTIMES)) \
 		$(if $(SWEEP_EVAL_OUT),      --out      $(SWEEP_EVAL_OUT)) \
 		$(SWEEP_EVAL_VERBOSE)
+
+## train-qat
+##   Run QAT fine-tuning inside Docker.
+##   Reads config from CONFIG (default: /app/config_qat.yaml mounted from repo root).
+##
+##   Optional overrides:
+##     CONFIG=/app/config_qat.yaml
+##     QAT_EPOCHS=10            override epochs from config
+##     QAT_FULL_INT8=--full-int8  enable full INT8 (head included)
+##     QAT_RESUME=checkpoints/qat_MDV6-yolov10-e_epoch005.modelopt
+##
+##   Examples:
+##     make train-qat
+##     make train-qat QAT_EPOCHS=0          # PTQ calibration + ONNX export only
+##     make train-qat QAT_FULL_INT8=--full-int8
+##     make train-qat QAT_RESUME=checkpoints/qat_MDV6-yolov10-e_epoch003.modelopt
+CONFIG          ?= /app/config_qat.yaml
+QAT_EPOCHS      ?=
+QAT_FULL_INT8   ?=
+QAT_RESUME      ?=
+
+train-qat:
+	@echo "--- QAT fine-tuning (config=$(CONFIG)) ---"
+	$(DOCKER_RUN) \
+		-v "$(CURDIR)/checkpoints:/app/checkpoints" \
+		-m PytorchWildlife_Export.finetune.qat_train \
+		--config $(CONFIG) \
+		$(if $(QAT_EPOCHS),   --epochs $(QAT_EPOCHS)) \
+		$(if $(QAT_FULL_INT8), $(QAT_FULL_INT8)) \
+		$(if $(QAT_RESUME),   --resume $(QAT_RESUME)) \
+		--log-level INFO
 
 # Default target
 all: install test

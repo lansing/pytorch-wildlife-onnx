@@ -129,6 +129,7 @@ class YOLOExporter(ABC):
         num_calibration_images: int = 300,
         model_type: str = "yolov10",
         quant_profile: str = "conv",
+        precomputed_scales: dict | None = None,
         **kwargs,
     ) -> None:
         """Run the full export pipeline.
@@ -179,6 +180,7 @@ class YOLOExporter(ABC):
                 input_size=input_shape[2],
                 num_calibration_images=num_calibration_images,
                 quant_profile=quant_profile,
+                precomputed_scales=precomputed_scales,
             )
 
         # ── Step 3: Subclass-specific output merges ───────────────────────
@@ -335,6 +337,7 @@ class YOLOExporter(ABC):
         input_size: int,
         num_calibration_images: int,
         quant_profile: str = "conv",
+        precomputed_scales: dict | None = None,
     ) -> onnx.ModelProto:
         """Calibrate and wrap nodes with INT8 QDQ pairs.
 
@@ -375,11 +378,18 @@ class YOLOExporter(ABC):
             f"{num_calibration_images} images, "
             f"excluding substrings {excludes}"
         )
+        if precomputed_scales:
+            LOGGER.info(
+                "QAT precomputed_scales provided for %d nodes — "
+                "ORT calibration runs for output scales; input scales overridden from QAT.",
+                len(precomputed_scales),
+            )
         return wrap_nodes_in_int8_qdq(
             base_model,
             calib_loader,
             node_types=node_types,
             exclude=excludes,
+            precomputed_scales=precomputed_scales,
         )
 
     @staticmethod
