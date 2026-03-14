@@ -28,6 +28,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
         libxcb1 libgl1 libsm6 libxext6 libxrender1 \
         libjpeg-dev libpng-dev libtiff-dev libwebp-dev ffmpeg \
+        curl \
         --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 

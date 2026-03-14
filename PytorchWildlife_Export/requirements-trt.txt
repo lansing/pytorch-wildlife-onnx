@@ -17,3 +17,4 @@ datasets
 Pillow
 opencv-python-headless
 textual
+fiftyone
