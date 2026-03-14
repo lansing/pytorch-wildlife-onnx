@@ -82,9 +82,8 @@ def _build_export_cmd(
     ]
     if fmt == "int8":
         cmd += ["--quant_profile", "blanket"]
-    if runtime == "tensorrt" and fmt == "int8":
         cmd += ["--num_calibration_images", str(num_calib_images)]
-        if dataset_yaml:
+        if runtime == "tensorrt" and dataset_yaml:
             cmd += ["--calibration_dataset", dataset_yaml,
                     "--calibration_split", calib_split]
     return cmd
@@ -94,11 +93,6 @@ def _all_variants(output_dir: Path) -> list[tuple[dict, Path]]:
     """Return list of (config_dict, output_path) for every permutation."""
     variants = []
     for version, size, fmt, runtime in product(MODEL_VERSIONS, INPUT_SIZES, FORMATS, RUNTIMES):
-        # ONNX int8 is not a useful export (no calibration loop, just PTQ nodes
-        # without TRT fusion) — skip it to avoid confusion.
-        if runtime == "onnx" and fmt == "int8":
-            continue
-
         filename = build_output_filename(
             model_version=version,
             format=fmt,

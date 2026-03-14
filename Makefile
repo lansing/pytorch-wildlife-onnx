@@ -1,5 +1,5 @@
 .PHONY: install uninstall clean test lint export demo dataset-build dataset-clean \
-        sweep-export sweep-eval
+        sweep-export sweep-eval ov-build ov-bench ov-bench-throughput ov-clinfo
 
 PYTHON_VERSION = 3.11.8
 VENV_DIR = .venv
@@ -218,6 +218,52 @@ sweep-eval:
 		$(if $(SWEEP_EVAL_RUNTIMES), --runtimes $(SWEEP_EVAL_RUNTIMES)) \
 		$(if $(SWEEP_EVAL_OUT),      --out      $(SWEEP_EVAL_OUT)) \
 		$(SWEEP_EVAL_VERBOSE)
+
+##
+## OpenVINO utility targets
+##
+
+OV_IMAGE       ?= openvino-util
+OV_DEVICE      ?= GPU
+# UHD 630 is at /dev/dri/renderD129 when co-installed with NVIDIA on renderD128
+OV_RENDER_NODE ?= /dev/dri/renderD128
+OV_CARD_NODE   ?= /dev/dri/card1
+MODEL          ?= MDV6-yolov10-e_float16_640_denorm_nhwc_uint8input.onnx
+
+DOCKER_RUN_OV = docker run --rm \
+	--device $(OV_CARD_NODE):$(OV_CARD_NODE) \
+	--device $(OV_RENDER_NODE):$(OV_RENDER_NODE) \
+	--group-add $(shell stat -c "%g" $(OV_RENDER_NODE)) \
+	-v "$(CURDIR)/exported_models:/models:ro" \
+	-v "$(CURDIR)/data:/data:ro" \
+	-v "$(CURDIR):/app:ro" \
+	--workdir /app \
+	$(OV_IMAGE)
+
+ov-build:
+	@echo "--- Building OpenVINO utility image ---"
+	docker build -f Dockerfile.openvino -t $(OV_IMAGE) .
+
+ov-clinfo:
+	@echo "--- Checking OpenCL devices inside container ---"
+	$(DOCKER_RUN_OV) clinfo -l
+
+ov-bench:
+	@echo "--- OpenVINO benchmark: $(MODEL) on $(OV_DEVICE) ---"
+	$(DOCKER_RUN_OV) benchmark_app \
+		-m /models/$(MODEL) \
+		-d $(OV_DEVICE) \
+		-hint latency \
+		-niter 200 \
+		-api sync
+
+ov-bench-throughput:
+	@echo "--- OpenVINO throughput benchmark: $(MODEL) on $(OV_DEVICE) ---"
+	$(DOCKER_RUN_OV) benchmark_app \
+		-m /models/$(MODEL) \
+		-d $(OV_DEVICE) \
+		-hint throughput \
+		-niter 200
 
 # Default target
 all: install test

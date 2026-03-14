@@ -64,8 +64,6 @@ def _all_variants(models_dir: Path) -> list[tuple[dict, Path]]:
     """Return (config, model_path) for every variant, same exclusions as export."""
     out = []
     for version, size, fmt, runtime in product(MODEL_VERSIONS, INPUT_SIZES, FORMATS, RUNTIMES):
-        if runtime == "onnx" and fmt == "int8":
-            continue  # not exported — skip
         filename = build_output_filename(
             model_version=version,
             format=fmt,
