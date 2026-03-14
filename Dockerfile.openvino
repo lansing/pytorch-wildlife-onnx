@@ -1,0 +1,16 @@
+FROM openvino/ubuntu22_runtime:2024.6.0
+
+USER root
+
+# Intel OpenCL ICD — required for GPU plugin on Gen9/Gen11 (UHD 630).
+# UHD 630 predates Level Zero; the GPU plugin uses OpenCL.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        intel-opencl-icd \
+        clinfo \
+        python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python packages for scripted benchmarking and accuracy checks
+RUN pip3 install --no-cache-dir openvino numpy opencv-python-headless
+
+WORKDIR /app
