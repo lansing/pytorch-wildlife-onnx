@@ -1,4 +1,5 @@
-.PHONY: install uninstall clean test lint export demo dataset-build dataset-clean
+.PHONY: install uninstall clean test lint export demo dataset-build dataset-clean \
+        sweep-export sweep-eval
 
 PYTHON_VERSION = 3.11.8
 VENV_DIR = .venv
@@ -137,6 +138,86 @@ dataset-build: dataset-clean
 		--log-level INFO
 	@echo "--- Dataset build complete.  Config: $(DATASET_OUTPUT)/megadetector_ft.yaml ---"
 	@echo "--- Provenance: $(DATASET_OUTPUT)/data_readme.md ---"
+
+##
+## Sweep targets
+##
+
+# Shared Docker invocation for GPU-dependent targets (eval / export / sweep).
+# Mounts the full repo at /app so all internal paths resolve correctly.
+IMAGE_TRT            ?= pytorch-wildlife-export-trt
+CONTAINER_DATA_DIR   ?= /data/md_ft
+CONTAINER_MODELS_DIR ?= /exported_models
+CONTAINER_CACHE_DIR  ?= /root/.cache/pytorch_wildlife_export
+
+DOCKER_RUN = docker run --runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all --rm \
+	--network host \
+	-v "$(CURDIR)/data:/data" \
+	-v "$(CURDIR)/exported_models:$(CONTAINER_MODELS_DIR)" \
+	-v "$(CURDIR)/cache:$(CONTAINER_CACHE_DIR)" \
+	-v "$(CURDIR):/app" \
+	--workdir /app \
+	--entrypoint python3 \
+	$(IMAGE_TRT)
+
+## sweep-export — export all standard MDV6-yolov10 variants (float16+int8 × 640+320 × onnx+trt).
+## Optional overrides:
+##   SWEEP_MODELS="MDV6-yolov10-e"   SWEEP_SIZES="640"
+##   SWEEP_FORMATS="float16"          SWEEP_RUNTIMES="tensorrt"
+##   SWEEP_CALIB_IMAGES=200           SWEEP_DATASET_YAML=/data/md_ft/megadetector_ft.yaml
+##   SWEEP_SKIP_EXISTING=--skip-existing   SWEEP_DRY_RUN=--dry-run
+SWEEP_MODELS        ?=
+SWEEP_SIZES         ?=
+SWEEP_FORMATS       ?=
+SWEEP_RUNTIMES      ?=
+SWEEP_CALIB_IMAGES  ?= 100
+SWEEP_DATASET_YAML  ?=
+SWEEP_SKIP_EXISTING ?=
+SWEEP_DRY_RUN       ?=
+
+sweep-export:
+	$(DOCKER_RUN) \
+		-m PytorchWildlife_Export.sweep_export \
+		--output-dir $(CONTAINER_MODELS_DIR) \
+		--num-calib-images $(SWEEP_CALIB_IMAGES) \
+		$(if $(SWEEP_MODELS),   --models   $(SWEEP_MODELS)) \
+		$(if $(SWEEP_SIZES),    --sizes    $(SWEEP_SIZES)) \
+		$(if $(SWEEP_FORMATS),  --formats  $(SWEEP_FORMATS)) \
+		$(if $(SWEEP_RUNTIMES), --runtimes $(SWEEP_RUNTIMES)) \
+		$(if $(SWEEP_DATASET_YAML), --dataset-yaml $(SWEEP_DATASET_YAML)) \
+		$(SWEEP_SKIP_EXISTING) \
+		$(SWEEP_DRY_RUN)
+
+## sweep-eval — evaluate all present MDV6-yolov10 variants, print metrics, write CSV.
+## Optional overrides:
+##   SWEEP_EVAL_SPLIT=test
+##   SWEEP_EVAL_MODELS="MDV6-yolov10-e"   SWEEP_EVAL_SIZES="640"
+##   SWEEP_EVAL_FORMATS="float16 int8"     SWEEP_EVAL_RUNTIMES="tensorrt"
+##   SWEEP_EVAL_OUT=/exported_models/my_results.csv
+##   SWEEP_EVAL_LOG=INFO    SWEEP_EVAL_VERBOSE=--verbose
+SWEEP_EVAL_SPLIT    ?= val
+SWEEP_EVAL_MODELS   ?=
+SWEEP_EVAL_SIZES    ?=
+SWEEP_EVAL_FORMATS  ?=
+SWEEP_EVAL_RUNTIMES ?=
+SWEEP_EVAL_OUT      ?=
+SWEEP_EVAL_LOG      ?= WARNING
+SWEEP_EVAL_VERBOSE  ?=
+
+sweep-eval:
+	@echo "--- Sweep eval (split=$(SWEEP_EVAL_SPLIT)) ---"
+	$(DOCKER_RUN) \
+		-m PytorchWildlife_Export.sweep_eval \
+		--models-dir $(CONTAINER_MODELS_DIR) \
+		--dataset    $(CONTAINER_DATA_DIR)/megadetector_ft.yaml \
+		--split      $(SWEEP_EVAL_SPLIT) \
+		--log-level  $(SWEEP_EVAL_LOG) \
+		$(if $(SWEEP_EVAL_MODELS),   --models   $(SWEEP_EVAL_MODELS)) \
+		$(if $(SWEEP_EVAL_SIZES),    --sizes    $(SWEEP_EVAL_SIZES)) \
+		$(if $(SWEEP_EVAL_FORMATS),  --formats  $(SWEEP_EVAL_FORMATS)) \
+		$(if $(SWEEP_EVAL_RUNTIMES), --runtimes $(SWEEP_EVAL_RUNTIMES)) \
+		$(if $(SWEEP_EVAL_OUT),      --out      $(SWEEP_EVAL_OUT)) \
+		$(SWEEP_EVAL_VERBOSE)
 
 # Default target
 all: install test

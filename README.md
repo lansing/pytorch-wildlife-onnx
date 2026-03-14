@@ -44,6 +44,28 @@ This script will:
 Follow the on-screen prompts in the TUI to select your desired model type, version, format, and other export options. Once complete, your exported model(s) and associated class files will be available in your local `exported_models` directory.
 
 
+## Evaluation Results
+
+> **Caveat:** The MegaDetector authors do not release details about their training data. The evaluation dataset used here was assembled from publicly available camera trap imagery (WCS, Caltech Camera Traps, Snapshot Serengeti, Island Conservation, and COCO 2017). Because some overlap with the original MegaDetector training distribution cannot be ruled out, these numbers should **not** be taken as absolute accuracy figures. They are presented as comparative metrics — useful for understanding the relative tradeoffs between model variant, input resolution, and quantization precision when choosing a model for your deployment.
+
+Evaluated on the `val` split of the assembled fine-tuning dataset (325 images). Runtime (ONNX vs TensorRT) has negligible effect on accuracy and is omitted.
+
+| Model variant | Input size | Precision | Animal AP50 | Animal AR50 |
+|---|---|---|---|---|
+| MDV6-yolov10-e | 640 | float16 | 0.745 | 0.966 |
+| MDV6-yolov10-e | 640 | int8 | 0.744 | 0.963 |
+| MDV6-yolov10-e | 320 | float16 | 0.537 | 0.793 |
+| MDV6-yolov10-e | 320 | int8 | 0.484 | 0.715 |
+| MDV6-yolov10-c | 640 | float16 | 0.699 | 0.954 |
+| MDV6-yolov10-c | 640 | int8 | 0.694 | 0.951 |
+| MDV6-yolov10-c | 320 | float16 | 0.587 | 0.885 |
+| MDV6-yolov10-c | 320 | int8 | 0.536 | 0.859 |
+
+Key observations:
+- INT8 quantization costs roughly **0–5 pp** on animal AP50 at 640px and slightly more at 320px.
+- The extra (`-e`) model at 320px outperforms the compact (`-c`) model at 320px on animal AP50, but the compact model has higher animal recall at 320px — likely due to lower confidence thresholds being needed for the smaller model.
+- Animal recall stays very high (>85%) across all 640px variants regardless of precision, making any 640px configuration suitable for surveillance use cases where missing a detection is costly.
+
 ## Model Selection Recommendations for NVR Detectors (Frigate etc)
 
 Choosing the right model and configuration for your object detection needs is crucial for balancing performance and accuracy. Here are some general guidelines:
