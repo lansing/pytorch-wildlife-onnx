@@ -189,6 +189,7 @@ def main(args=None):
         num_calibration_images=args.num_calibration_images,
         model_type=args.model_type,
         quant_profile=args.quant_profile,
+        device=args.device,
     )
 
     if args.model_type in ("yolov9", "yolov10"):

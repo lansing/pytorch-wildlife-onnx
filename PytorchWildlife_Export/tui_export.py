@@ -1,5 +1,6 @@
 import argparse  # Added argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,30 @@ from textual.widgets import (
     RadioSet,
     Static,
 )
+
+def _enumerate_gpus() -> list[tuple[str, str]]:
+    """Return [(device_str, display_name), ...] for all visible CUDA GPUs."""
+    try:
+        import torch
+        count = torch.cuda.device_count()
+        return [(f"cuda:{i}", torch.cuda.get_device_name(i)) for i in range(count)]
+    except Exception:
+        return []
+
+
+def gpu_name_slug(device_name: str) -> str:
+    """Convert a GPU display name to a short filename-safe slug.
+
+    Examples:
+        "NVIDIA GeForce RTX 2080 Ti" -> "rtx2080ti"
+        "NVIDIA RTX A4000"           -> "rtxa4000"
+        "Tesla T4"                   -> "teslat4"
+    """
+    s = device_name.lower()
+    for word in ("nvidia", "geforce", "quadro"):
+        s = re.sub(r"\b" + word + r"\b", "", s)
+    return re.sub(r"[^a-z0-9]", "", s)
+
 
 try:
     CONFIG = yaml.safe_load(Path("PytorchWildlife_Export/tui_config.yaml").read_text())
@@ -189,6 +214,54 @@ class InputScreen(BaseSelectionScreen):
         return True
 
 
+class GpuSelectionScreen(Screen):
+    """Dynamic GPU selection screen — shown only when >1 NVIDIA GPU is present."""
+
+    def __init__(self, gpus: list[tuple[str, str]], next_screen_callable, **kwargs):
+        super().__init__(**kwargs)
+        self.gpus = gpus  # [(device_str, display_name), ...]
+        self.next_screen_callable = next_screen_callable
+
+    def compose(self) -> ComposeResult:
+        with Container(id="selection_container"):
+            yield Markdown(
+                "## Select GPU\n\n"
+                "Multiple NVIDIA GPUs detected. Choose which GPU to use for "
+                "TensorRT engine compilation and INT8 calibration."
+            )
+            with RadioSet(id="gpu_radioset"):
+                for i, (device_str, display_name) in enumerate(self.gpus):
+                    rb = RadioButton(f"{display_name}  ({device_str})", id=f"gpu_{i}")
+                    if i == 0:
+                        rb.value = True
+                    yield rb
+            yield Button("Next", variant="primary", id="next_button")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one(Container).border_title = "GPU Selection"
+        # Pre-populate with the first GPU so selections are always valid
+        if self.gpus:
+            device_str, display_name = self.gpus[0]
+            self.app.selections["device"] = device_str
+            self.app.selections["gpu_name"] = display_name
+
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        if event.pressed:
+            idx = int(event.pressed.id.split("_")[1])
+            device_str, display_name = self.gpus[idx]
+            self.app.selections["device"] = device_str
+            self.app.selections["gpu_name"] = display_name
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "next_button":
+            self.app.push_screen(self.next_screen_callable())
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "q":
+            self.app.push_screen(QuitScreen())
+
+
 class SummaryScreen(Screen):
     """Screen to show a summary and run the export."""
 
@@ -218,7 +291,8 @@ class SummaryScreen(Screen):
         preproc_str = ", ".join(preproc_parts) if preproc_parts else "none"
 
         is_int8 = selections.get("format") == "int8"
-        is_int8_trt = is_int8 and selections.get("runtime") == "tensorrt"
+        is_trt = selections.get("runtime") == "tensorrt"
+        is_int8_trt = is_int8 and is_trt
 
         quant_profile_line = (
             "\n- **Quant Profile**: `blanket` (Conv + Add + MaxPool)"
@@ -230,11 +304,17 @@ class SummaryScreen(Screen):
             if is_int8_trt
             else ""
         )
+        gpu_line = ""
+        if is_trt and selections.get("gpu_name"):
+            gpu_line = (
+                f"\n- **GPU**: `{selections['gpu_name']}` "
+                f"(`{selections.get('device', 'cuda:0')}`)"
+            )
 
         return f"""
 - **Model Type**: `{selections["model_type"]}`
 - **Model Version**: `{selections["model_version"]}`
-- **Runtime**: `{selections["runtime"]}`
+- **Runtime**: `{selections["runtime"]}`{gpu_line}
 - **Output Directory**: `{selections["output_dir"]}`
 - **Output Path**: `{output_path}`
 - **Format**: `{selections["format"]}`{quant_profile_line}
@@ -256,7 +336,10 @@ class SummaryScreen(Screen):
             filename_base += "_nhwc"
         if selections.get("uint8_input"):
             filename_base += "_uint8input"
-        ext = ".engine" if selections.get("runtime") == "tensorrt" else ".onnx"
+        is_trt = selections.get("runtime") == "tensorrt"
+        if is_trt and selections.get("gpu_name"):
+            filename_base += "_" + gpu_name_slug(selections["gpu_name"])
+        ext = ".engine" if is_trt else ".onnx"
         filename = f"{filename_base}{ext}"
         return os.path.join(selections["output_dir"], filename)
 
@@ -358,6 +441,8 @@ class ExecutionScreen(Screen):
                 "--num_calibration_images",
                 str(selections.get("num_calibration_images", 100)),
             ]
+        if selections.get("runtime") == "tensorrt" and selections.get("device"):
+            cmd += ["--device", selections["device"]]
         return cmd
 
 
@@ -392,7 +477,24 @@ class ExportTUI(App):
         return ChoiceSelectionScreen("model_version", self.get_runtime_screen)
 
     def get_runtime_screen(self):
-        return ChoiceSelectionScreen("runtime", self.get_output_dir_screen)
+        return ChoiceSelectionScreen("runtime", self.get_post_runtime_screen)
+
+    def get_post_runtime_screen(self):
+        """After runtime selection: insert GPU picker for TRT when >1 GPU present."""
+        if self.selections.get("runtime") == "tensorrt":
+            gpus = _enumerate_gpus()
+            if len(gpus) > 1:
+                return GpuSelectionScreen(gpus, self.get_output_dir_screen)
+            # Single GPU (or no torch/CUDA): auto-assign, no menu shown
+            device_str = gpus[0][0] if gpus else "cuda:0"
+            gpu_name = gpus[0][1] if gpus else ""
+            self.selections["device"] = device_str
+            self.selections["gpu_name"] = gpu_name
+        else:
+            # ONNX export — clear any stale GPU selection from a previous run
+            self.selections.pop("device", None)
+            self.selections.pop("gpu_name", None)
+        return self.get_output_dir_screen()
 
     def get_output_dir_screen(self):
         return InputScreen("output_dir", self.get_format_screen)

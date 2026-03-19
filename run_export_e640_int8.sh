@@ -40,11 +40,12 @@ docker run --runtime nvidia -e NVIDIA_VISIBLE_DEVICES=all --rm \
     "$IMAGE_NAME" \
     PytorchWildlife_Export/export_tool.py \
         --model_type      yolov10 \
-        --model_version   MDV6-yolov10-e \
+        --model_version   MDV6-yolov10-c \
         --output_path     "$CONTAINER_EXPORTED_MODELS_DIR/$OUTPUT_FILENAME" \
         --format          int8 \
         --quant_profile   blanket \
         --runtime         tensorrt \
+        --device          "cuda:1" \
         --input_img_size  640 \
         --uint8_input \
         --denormalized_input \

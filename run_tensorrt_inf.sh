@@ -45,9 +45,10 @@ docker run -it --runtime nvidia --rm \
     -v "$(pwd):/app" \
     --entrypoint trtexec \
     "$IMAGE_NAME" \
-    --loadEngine=/app/PytorchWildlife_Export/demo/demo_output/MDV6-yolov10-e_int8_640_denorm_nhwc_uint8input.engine \
+    --loadEngine=/app/PytorchWildlife_Export/demo/demo_output/MDV6-yolov10-c_int8_640_denorm_nhwc_uint8input_rtx3050.engine \
     --iterations=1000 \
     --warmUp=200 \
+    --device=1
 
      # --dumpLayerInfo \
      # --dumpProfile \

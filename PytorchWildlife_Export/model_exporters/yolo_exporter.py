@@ -16,6 +16,18 @@ from .util import merge_onnx_models
 LOGGER = logging.getLogger(__name__)
 
 
+def _cuda_device_idx(device: str) -> int:
+    """Parse a device string into a CUDA device index.
+
+    Examples:
+        "cuda:0" → 0,  "cuda:1" → 1,  "cuda" → 0,  "cpu" → 0
+    """
+    if device.startswith("cuda"):
+        parts = device.split(":")
+        return int(parts[1]) if len(parts) > 1 else 0
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # INT8 exclusion rules per model architecture
 #
@@ -129,6 +141,7 @@ class YOLOExporter(ABC):
         num_calibration_images: int = 300,
         model_type: str = "yolov10",
         quant_profile: str = "conv",
+        device: str = "cpu",
         **kwargs,
     ) -> None:
         """Run the full export pipeline.
@@ -161,7 +174,7 @@ class YOLOExporter(ABC):
 
         # For TRT we need tensorrt importable; check early.
         if runtime == "tensorrt":
-            self._ensure_tensorrt()
+            self._ensure_tensorrt(_cuda_device_idx(device))
 
         # ── Step 1: Export base YOLO to float32 ONNX ─────────────────────
         base_onnx_path = self._export_base_onnx(
@@ -179,10 +192,11 @@ class YOLOExporter(ABC):
                 input_size=input_shape[2],
                 num_calibration_images=num_calibration_images,
                 quant_profile=quant_profile,
+                cuda_device_idx=_cuda_device_idx(device),
             )
 
         # ── Step 3: Subclass-specific output merges ───────────────────────
-        yolo_output_shape = model.model(torch.zeros(input_shape))[0].shape
+        yolo_output_shape = model.model(torch.zeros(input_shape, device=device))[0].shape
         merged_model = self.do_your_merges(
             yolo_output_shape, base_model, num_classes, opset_version
         )
@@ -335,6 +349,7 @@ class YOLOExporter(ABC):
         input_size: int,
         num_calibration_images: int,
         quant_profile: str = "conv",
+        cuda_device_idx: int = 0,
     ) -> onnx.ModelProto:
         """Calibrate and wrap nodes with INT8 QDQ pairs.
 
@@ -380,6 +395,7 @@ class YOLOExporter(ABC):
             calib_loader,
             node_types=node_types,
             exclude=excludes,
+            device_id=cuda_device_idx,
         )
 
     @staticmethod
@@ -394,7 +410,7 @@ class YOLOExporter(ABC):
         )
 
     @staticmethod
-    def _ensure_tensorrt() -> None:
+    def _ensure_tensorrt(device_idx: int = 0) -> None:
         """Initialise PyTorch CUDA context and verify TensorRT is importable.
 
         PyTorch CUDA must be initialised *before* importing TensorRT to avoid
@@ -405,9 +421,11 @@ class YOLOExporter(ABC):
         import torch
 
         if torch.cuda.is_available():
+            torch.cuda.set_device(device_idx)
             torch.zeros(1).cuda()
             LOGGER.info(
-                f"CUDA context initialised on device: {torch.cuda.get_device_name(0)}"
+                f"CUDA context initialised on device {device_idx}: "
+                f"{torch.cuda.get_device_name(device_idx)}"
             )
         else:
             LOGGER.warning("No CUDA device found; TRT export may fail.")

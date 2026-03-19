@@ -320,7 +320,7 @@ def calibrate_node_scales(
         onnx.save(calib_model, tmp_path)
         session = ort.InferenceSession(
             tmp_path,
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            providers=[("CUDAExecutionProvider", {"device_id": device_id}), "CPUExecutionProvider"],
         )
     finally:
         os.unlink(tmp_path)
@@ -573,6 +573,7 @@ def calibrate_conv_nodes_scales(
     target_node_names: list,
     calibration_loader,
     silu_map: dict = None,
+    device_id: int = 0,
 ) -> dict:
     """
     Single-pass calibration for multiple nodes (Conv, MatMul, SiLU Mul,
@@ -641,7 +642,7 @@ def calibrate_conv_nodes_scales(
         onnx.save(calib_model, tmp_path)
         session = ort.InferenceSession(
             tmp_path,
-            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            providers=[("CUDAExecutionProvider", {"device_id": device_id}), "CPUExecutionProvider"],
         )
     finally:
         os.unlink(tmp_path)
@@ -687,6 +688,7 @@ def wrap_nodes_in_int8_qdq(
     exclude: list = None,
     max_index: dict = None,
     node_names: list = None,
+    device_id: int = 0,
 ) -> onnx.ModelProto:
     """
     Calibrates and wraps nodes in INT8 QDQ pairs.
@@ -777,7 +779,7 @@ def wrap_nodes_in_int8_qdq(
     print(f"Total nodes to quantize: {len(target_names)}")
 
     scales = calibrate_conv_nodes_scales(
-        model, target_names, calibration_loader, silu_map=silu_map
+        model, target_names, calibration_loader, silu_map=silu_map, device_id=device_id
     )
 
     result = model
